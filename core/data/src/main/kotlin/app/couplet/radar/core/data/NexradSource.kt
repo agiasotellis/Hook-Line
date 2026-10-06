@@ -1,0 +1,92 @@
+package app.couplet.radar.core.data
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.IOException
+import java.time.LocalDate
+import java.util.Locale
+
+/**
+ * Reads NEXRAD Level II straight from NOAA's public AWS Open Data buckets.
+ * No account, no keys, no Couplet server in between — which is why a
+ * one-time price is sustainable.
+ *
+ * - Real-time: `unidata-nexrad-level2-chunks/<SITE>/<volume#>/<yyyyMMdd-HHmmss>-<seq>-<S|I|E>`
+ * - Archive:   `unidata-nexrad-level2/<yyyy>/<MM>/<dd>/<SITE>/<SITE><yyyyMMdd_HHmmss>_V06`
+ */
+class NexradSource(
+    private val http: OkHttpClient,
+    private val realtimeBase: String = "https://unidata-nexrad-level2-chunks.s3.amazonaws.com",
+    private val archiveBase: String = "https://unidata-nexrad-level2.s3.amazonaws.com",
+) {
+    /** A chunk of the volume currently being scanned. */
+    data class Chunk(val key: String, val volume: Int, val sequence: Int, val kind: Char) {
+        val isStart get() = kind == 'S'
+        val isEnd get() = kind == 'E'
+    }
+
+    /** Most recent chunks for [site], oldest first, for the newest volume number seen. */
+    suspend fun latestChunks(site: String): List<Chunk> {
+        val keys = listKeys(realtimeBase, "$site/")
+        val chunks = keys.mapNotNull(::parseChunkKey)
+        val newestVolume = chunks.maxByOrNull { it.key.substringAfter('/').substringAfter('/') }?.volume
+            ?: return emptyList()
+        return chunks.filter { it.volume == newestVolume }.sortedBy { it.sequence }
+    }
+
+    suspend fun fetchChunk(chunk: Chunk): ByteArray = get("$realtimeBase/${chunk.key}")
+
+    /** Archived volume keys for a site on a UTC date. */
+    suspend fun archiveKeys(site: String, date: LocalDate): List<String> {
+        val prefix = "%04d/%02d/%02d/%s/".format(Locale.US, date.year, date.monthValue, date.dayOfMonth, site)
+        return listKeys(archiveBase, prefix).filterNot { it.endsWith("_MDM") }.sorted()
+    }
+
+    suspend fun fetchArchive(key: String): ByteArray = get("$archiveBase/$key")
+
+    private suspend fun listKeys(base: String, prefix: String): List<String> {
+        val keys = mutableListOf<String>()
+        var token: String? = null
+        do {
+            val url = base.toHttpUrl().newBuilder()
+                .addQueryParameter("list-type", "2")
+                .addQueryParameter("prefix", prefix)
+                .apply { token?.let { addQueryParameter("continuation-token", it) } }
+                .build()
+            val xml = String(get(url.toString()), Charsets.UTF_8)
+            keys += S3Listing.keys(xml)
+            token = S3Listing.continuationToken(xml)
+        } while (token != null)
+        return keys
+    }
+
+    private suspend fun get(url: String): ByteArray = withContext(Dispatchers.IO) {
+        http.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            if (!r.isSuccessful) throw IOException("HTTP ${r.code} for $url")
+            r.body?.bytes() ?: ByteArray(0)
+        }
+    }
+
+    companion object {
+        private val CHUNK = Regex("""^([A-Z0-9]{4})/(\d+)/\d{8}-\d{6}-(\d+)-([SIE])$""")
+
+        fun parseChunkKey(key: String): Chunk? = CHUNK.matchEntire(key)?.let { m ->
+            Chunk(key, m.groupValues[2].toInt(), m.groupValues[3].toInt(), m.groupValues[4][0])
+        }
+    }
+}
+
+/** Minimal S3 ListObjectsV2 XML reader; avoids an XML dependency. */
+internal object S3Listing {
+    private val KEY = Regex("<Key>([^<]+)</Key>")
+    private val TOKEN = Regex("<NextContinuationToken>([^<]+)</NextContinuationToken>")
+
+    fun keys(xml: String): List<String> = KEY.findAll(xml).map { unescape(it.groupValues[1]) }.toList()
+    fun continuationToken(xml: String): String? = TOKEN.find(xml)?.groupValues?.get(1)?.let(::unescape)
+
+    private fun unescape(s: String) = s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&quot;", "\"").replace("&apos;", "'")
+}

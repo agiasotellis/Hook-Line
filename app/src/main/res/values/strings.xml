@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Couplet</string>
+    <string name="channel_warnings">Warnings for your places</string>
+    <string name="channel_storm_mode">Storm Mode status</string>
+    <string name="storm_mode_running">Checking NWS warnings every 60 s</string>
+    <string name="disclaimer">Follow official NWS and local guidance. Couplet shows NWS data and isn\'t a warning service.</string>
+</resources>
