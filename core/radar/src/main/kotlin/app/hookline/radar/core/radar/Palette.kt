@@ -112,6 +112,38 @@ class Palette(
             """.trimIndent()
         )
 
+        /** Correlation coefficient: low values (debris, hail, biologicals) pop out in warm colours. */
+        val CORRELATION: Palette = parse(
+            """
+            Units:
+            Color: 0.20 120 120 120
+            Color: 0.45 20 30 160
+            Color: 0.65 40 160 220
+            Color: 0.80 70 200 90
+            Color: 0.90 240 220 40
+            Color: 0.95 240 140 30
+            Color: 0.98 220 40 40
+            Color: 1.00 150 20 90
+            Color: 1.05 230 200 230
+            """.trimIndent()
+        )
+
+        /** Differential reflectivity (dB). */
+        val ZDR: Palette = parse(
+            """
+            Units: dB
+            Color: -4 60 60 60
+            Color: -1 140 140 160
+            Color: 0 200 200 200
+            Color: 0.5 60 80 200
+            Color: 1.5 40 180 220
+            Color: 2.5 60 200 80
+            Color: 3.5 240 230 40
+            Color: 5 240 120 30
+            Color: 8 200 20 40
+            """.trimIndent()
+        )
+
         fun argb(a: Int, r: Int, g: Int, b: Int): Int =
             (a.coerceIn(0, 255) shl 24) or (r.coerceIn(0, 255) shl 16) or (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)
 

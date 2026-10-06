@@ -13,6 +13,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -65,6 +66,14 @@ class NwsAlerts(
         parse(get("$base/alerts/active?point=%.4f,%.4f".format(Locale.US, point.lat, point.lon)))
 
     suspend fun activeInArea(stateCode: String): List<Alert> = parse(get("$base/alerts/active?area=$stateCode"))
+
+    /** All active alerts of the given event types nationwide, e.g. every tornado warning. */
+    suspend fun activeEvents(events: List<String>): List<Alert> {
+        val url = "$base/alerts/active".toHttpUrl().newBuilder()
+            .addQueryParameter("event", events.joinToString(","))
+            .build()
+        return parse(get(url.toString()))
+    }
 
     private suspend fun get(url: String): String = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(url)

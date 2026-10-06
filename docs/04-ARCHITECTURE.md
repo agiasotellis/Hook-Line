@@ -18,12 +18,12 @@ core/designsystem/      Compose tokens + components (see 03-DESIGN-SYSTEM.md)
 
 Planned modules: `core/render` (OpenGL ES 3 radial renderer), `core/map` (MapLibre wrapper + offline regions), `feature/timemachine`, `feature/places`, `widget`, `wear`.
 
-## Data flow (live)
+## Data flow (live, implemented in `LiveRadar` / `VolumeAssembler`)
 
 ```
-S3 listing (every 15 s while foreground)
+S3 listing (every 10 s while foreground; newest volume found across the 1–999 wrap)
    └─ new chunk key? ─► fetch chunk (~100–600 KB) ─► Level2Decoder.decodeRadials
-                                                     └─► SweepAssembler (by elevation #)
+                                                     └─► VolumeAssembler (by elevation #, keeps newest complete sweep per tilt × moment)
                                                             └─► GL value textures (per moment)
                                                                    └─► RadialRenderer (shader + palette LUT)
 NWS API (every 60 s foreground / Storm Mode) ─► Alert polygons ─► MapLibre GeoJSON layer
@@ -44,10 +44,13 @@ Updating on each chunk rather than each full volume is the latency win: the 0.5�
 | GOES ABI + GLM | NOAA GOES-19/18 on AWS Open Data | GLM = free total lightning |
 | Base map | OpenFreeMap or self-hosted PMTiles | Only recurring cost (CDN) |
 
-## Rendering plan (M0)
-- One VBO per elevation holding the static radial mesh (`RadialGeometry.radialMesh`) — rebuilt only when the VCP's gate layout changes.
-- Per-moment **R16F value texture** (radials × gates). Fragment shader samples value → palette LUT (`Palette.toLut`) → discard below-threshold.
-- Map transform: site lat/lon → Web Mercator; mesh in metres east/north is scaled per-latitude on the GPU.
+## Rendering (implemented)
+- `SweepTexture` packs one moment of one sweep as a radials × gates float grid, uploaded as an **R32F texture** sampled NEAREST. Sentinels (below threshold, range folded) are encoded as ±1e30 so the shader can test them portably.
+- **One wedge (two triangles) per radial**, u running 0→1 across the gates. Because both wedge edges are radial, linear interpolation of u matches true range to within cos(0.25°) — every gate lands on exactly one texel, so the data is drawn in native polar form with no resampling.
+- Fragment shader: value → palette LUT (`Palette.toLut`, 256 entries) → discard transparent. Range folded is drawn in the palette's RF colour.
+- Range rings and warning outlines are triangulated thick lines (`ThickLines`) rebuilt at the current zoom, since `glLineWidth` > 1 isn't portable.
+- `RadarGlView` (GLSurfaceView, render-when-dirty) owns pan/zoom/long-press; `Viewport` holds the maths and is unit-tested.
+- Projection is local equirectangular around the site for now (< 0.5 % error within 460 km); it moves to Web Mercator with the MapLibre base map.
 - Target: 60 fps pan/zoom with 4 panes on a 2021 mid-range device (Adreno 619 class).
 
 The current `SweepRasterizer` (CPU) is the fallback for widgets, Wear tiles, loop export and the interim map.

@@ -70,6 +70,18 @@ class DataTest {
     }
 
     @Test
+    fun projectsToLocalMetres() {
+        val ktlx = Sites.byId("KTLX")!!.location
+        // One degree of latitude north is ~111.2 km.
+        val (e, n) = Sites.toLocalMeters(LatLon(ktlx.lat + 1, ktlx.lon), ktlx)
+        assertEquals(0.0, e, 1.0)
+        assertEquals(111_195.0, n, 50.0)
+        // Moore is west of the radar, at about the same latitude.
+        val (me, mn) = Sites.toLocalMeters(LatLon(35.34, -97.49), ktlx)
+        assertTrue(me < 0 && kotlin.math.abs(mn) < 2_000)
+    }
+
+    @Test
     fun parsesRealtimeChunkKeys() {
         val c = NexradSource.parseChunkKey("KTLX/412/20261006-193012-005-I")!!
         assertEquals(412, c.volume)

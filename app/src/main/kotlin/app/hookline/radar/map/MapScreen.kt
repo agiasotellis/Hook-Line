@@ -1,17 +1,14 @@
 package app.hookline.radar.map
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,105 +17,164 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.hookline.radar.core.data.Hazard
 import app.hookline.radar.core.designsystem.ChromePanel
-import app.hookline.radar.core.designsystem.Hookline
 import app.hookline.radar.core.designsystem.Dimens
 import app.hookline.radar.core.designsystem.HazardColors
 import app.hookline.radar.core.designsystem.HazardSwatch
+import app.hookline.radar.core.designsystem.Hookline
 import app.hookline.radar.core.designsystem.PillRow
 import app.hookline.radar.core.designsystem.Readout
 import app.hookline.radar.core.designsystem.SelectPill
+import app.hookline.radar.render.RadarGlView
 
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
     val c = Hookline.colors
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // Plain holder (not snapshot state): the view is created inside composition.
+    val glHolder = remember { arrayOfNulls<RadarGlView>(1) }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(c.mapVoid)) {
-        val density = LocalDensity.current
-        val wPx = with(density) { maxWidth.roundToPx() }
-        val hPx = with(density) { maxHeight.roundToPx() }
-        LaunchedEffect(wPx, hPx) { vm.onViewport(wPx, hPx) }
-
-        s.image?.let { bmp ->
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = "${s.product.label} scan from ${s.site}",
-                contentScale = ContentScale.FillBounds,
-                // Nearest-neighbour keeps radar bins crisp; never smooth data.
-                filterQuality = FilterQuality.None,
-                modifier = Modifier.fillMaxSize(),
-            )
+    // GLSurfaceView must follow the activity lifecycle.
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
+                Lifecycle.Event.ON_RESUME -> glHolder[0]?.onResume()
+                Lifecycle.Event.ON_PAUSE -> glHolder[0]?.onPause()
+                else -> Unit
+            }
         }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
+    }
+
+    Box(Modifier.fillMaxSize().background(c.mapVoid)) {
+        AndroidView(
+            factory = { ctx ->
+                RadarGlView(ctx).also { v ->
+                    v.renderer.setClearColor(0xFF141B22.toInt())
+                    v.onInspect = vm::inspect
+                    glHolder[0] = v
+                }
+            },
+            update = { v ->
+                // Re-centre on the radar when the site changes.
+                if (v.tag != s.site.id) {
+                    v.tag = s.site.id
+                    v.center(0.0, 0.0, metersPerPixel = 250.0)
+                }
+                v.setFrame(s.frame)
+                v.setOutlines(s.outlines)
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
 
         Column(
             Modifier.fillMaxWidth().statusBarsPadding().padding(Dimens.EdgeInset),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SiteChip(s.site, s.siteName)
-                s.warningHeadline?.let { WarningBanner(it, s.warningDetail.orEmpty(), Modifier.weight(1f)) }
+                SiteChip(s, onSelect = vm::selectSite)
+                s.homeWarning?.let { w ->
+                    WarningBanner(
+                        headline = w.event,
+                        detail = "Home" + (w.expires?.let { ", until " + MapViewModel.clock(it.toEpochMilli()) } ?: ""),
+                        hazard = w.hazard,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
-            if (s.stormModeOn) StatusChip("Storm Mode on")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StatusChip(s.status)
+                if (s.stormModeOn) Chip("Storm Mode on", dot = true)
+            }
         }
 
         TiltLadder(
-            tilts = s.tilts, selected = s.tiltIndex, onSelect = vm::selectTilt,
+            tilts = s.tilts, selected = s.tilt, onSelect = vm::selectTilt,
             modifier = Modifier.align(Alignment.CenterEnd).padding(end = Dimens.EdgeInset),
         )
 
-        BottomDock(
-            state = s,
-            onProduct = vm::selectProduct,
-            onPlay = vm::togglePlay,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
-    }
-}
-
-@Composable
-private fun SiteChip(id: String, name: String) {
-    ChromePanel(Modifier.height(Dimens.MinTouch).clickable { /* open radar picker */ }) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.Center) {
-            Text(id, style = Hookline.type.title, color = Hookline.colors.ink)
-            Text(name, style = Hookline.type.caption, color = Hookline.colors.inkSecondary)
+        Column(Modifier.align(Alignment.BottomCenter)) {
+            s.inspector?.let { InspectorCard(it, onDismiss = vm::dismissInspector) }
+            BottomDock(s, onProduct = vm::selectProduct)
         }
     }
 }
 
 @Composable
-private fun WarningBanner(headline: String, detail: String, modifier: Modifier = Modifier) {
+private fun SiteChip(s: MapUiState, onSelect: (app.hookline.radar.core.data.RadarSite) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        ChromePanel(Modifier.height(Dimens.MinTouch).clickable { open = true }.semantics {
+            contentDescription = "Radar site ${s.site.id}, ${s.site.name}. Tap to change."
+        }) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.Center) {
+                Text(s.site.id, style = Hookline.type.title, color = Hookline.colors.ink)
+                Text(s.site.name, style = Hookline.type.caption, color = Hookline.colors.inkSecondary)
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            s.sites.forEach { site ->
+                DropdownMenuItem(
+                    text = { Text("${site.id}  ${site.name}", style = Hookline.type.control) },
+                    onClick = { open = false; onSelect(site) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WarningBanner(headline: String, detail: String, hazard: Hazard, modifier: Modifier = Modifier) {
     val c = Hookline.colors
+    val color = when (hazard) {
+        Hazard.TORNADO_EMERGENCY -> HazardColors.TornadoEmergency
+        Hazard.TORNADO_WARNING -> HazardColors.TornadoWarning
+        Hazard.SEVERE_WARNING -> HazardColors.SevereWarning
+        Hazard.FLASH_FLOOD_WARNING -> HazardColors.FlashFlood
+        Hazard.TORNADO_WATCH -> HazardColors.TornadoWatch
+        else -> HazardColors.SevereWatch
+    }
     Row(
         modifier
             .height(Dimens.MinTouch)
             .background(c.chrome, RoundedCornerShape(Dimens.AlertRadius))
-            .border(1.dp, HazardColors.TornadoWarning, RoundedCornerShape(Dimens.AlertRadius))
-            .clickable { /* open alert detail */ }
+            .border(1.dp, color, RoundedCornerShape(Dimens.AlertRadius))
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        HazardSwatch(HazardColors.TornadoWarning)
+        HazardSwatch(color)
         Column {
             Text(headline, style = Hookline.type.control, color = c.ink)
             Text(detail, style = Hookline.type.caption, color = c.inkSecondary)
@@ -127,105 +183,134 @@ private fun WarningBanner(headline: String, detail: String, modifier: Modifier =
 }
 
 @Composable
-private fun StatusChip(text: String) {
-    val c = Hookline.colors
-    Row(
-        Modifier.background(c.chrome, CircleShape).border(1.dp, c.hairline, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(Modifier.size(7.dp).background(c.ink, CircleShape))
-        Text(text, style = Hookline.type.caption, color = c.inkSecondary)
+private fun StatusChip(status: FeedStatus) {
+    when (status) {
+        FeedStatus.Connecting -> Chip("Connecting to radar…")
+        FeedStatus.Live -> Chip("Live", dot = true)
+        is FeedStatus.Stale -> Chip("Not updating: ${status.message}", hatched = true)
+        is FeedStatus.Demo -> Chip("Demo storm, not real data", hatched = true)
     }
 }
 
 @Composable
-private fun TiltLadder(tilts: List<Float>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+private fun Chip(text: String, dot: Boolean = false, hatched: Boolean = false) {
+    val c = Hookline.colors
+    Row(
+        Modifier.background(c.chrome, CircleShape)
+            .border(1.dp, if (hatched) c.ink else c.hairline, CircleShape)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (dot) Box(Modifier.size(7.dp).background(c.ink, CircleShape))
+        Text(text, style = Hookline.type.caption, color = if (hatched) c.ink else c.inkSecondary, maxLines = 1)
+    }
+}
+
+@Composable
+private fun TiltLadder(tilts: List<Float>, selected: Float, onSelect: (Float) -> Unit, modifier: Modifier = Modifier) {
+    if (tilts.isEmpty()) return
     ChromePanel(modifier) {
-        Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            tilts.forEachIndexed { i, t ->
-                SelectPill("$t°", selected = i == selected, onClick = { onSelect(i) }, modifier = Modifier.width(52.dp))
+        Column(
+            Modifier.padding(4.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            tilts.take(8).forEach { t ->
+                SelectPill("$t°", selected = t == selected, onClick = { onSelect(t) }, modifier = Modifier.width(52.dp))
             }
         }
     }
 }
 
 @Composable
-private fun BottomDock(state: MapUiState, onProduct: (Product) -> Unit, onPlay: () -> Unit, modifier: Modifier = Modifier) {
+private fun InspectorCard(i: Inspection, onDismiss: () -> Unit) {
     val c = Hookline.colors
     Column(
-        modifier
+        Modifier
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .background(c.raised, RoundedCornerShape(Dimens.PanelRadius))
+            .border(1.dp, c.hairline, RoundedCornerShape(Dimens.PanelRadius))
+            .clickable(onClick = onDismiss)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(i.value, style = Hookline.type.readoutXL, color = c.ink)
+        Text(i.meaning, style = Hookline.type.body, color = c.ink)
+        Text(i.height, style = Hookline.type.caption, color = c.inkSecondary)
+    }
+}
+
+@Composable
+private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit) {
+    val c = Hookline.colors
+    Column(
+        Modifier
             .fillMaxWidth()
             .background(c.mapVoid.copy(alpha = 0.94f))
             .navigationBarsPadding()
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Legend(state.product)
+        Legend(s.product)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(
-                Modifier.size(48.dp).border(1.dp, c.hairline, CircleShape).clickable(onClick = onPlay)
-                    .semantics { contentDescription = if (state.playing) "Pause loop" else "Play loop" },
-                contentAlignment = Alignment.Center,
-            ) { Text(if (state.playing) "II" else "▶", style = Hookline.type.control, color = c.ink) }
-            TimeTape(Modifier.weight(1f).height(48.dp))
+            TimeTape(s.ticks, s.nowMillis, Modifier.weight(1f).height(48.dp))
+            val age = s.scanAgeSeconds
             Readout(
-                value = "%d:%02d".format(state.scanAgeSeconds / 60, state.scanAgeSeconds % 60),
-                caption = "scan age",
+                value = age?.let { if (it < 3600) "%d:%02d".format(it / 60, it % 60) else "${it / 3600} h" } ?: "–",
+                caption = if (age != null && age > 600) "scan age, stale" else "scan age",
                 alignEnd = true,
             )
         }
         PillRow {
             Product.entries.forEach { p ->
-                SelectPill(p.label, selected = p == state.product, onClick = { onProduct(p) }, modifier = Modifier.weight(1f))
+                val enabled = p in s.availableProducts
+                SelectPill(
+                    p.label,
+                    selected = p == s.product,
+                    onClick = { if (enabled) onProduct(p) },
+                    modifier = Modifier.weight(1f).alpha(if (enabled) 1f else 0.35f),
+                )
             }
         }
+        Text("Radar and warnings: NOAA / National Weather Service", style = Hookline.type.caption, color = c.inkSecondary)
     }
 }
 
-/** Instrument tape: ticks per sweep, tall = low tilt, fixed centre needle. */
+/**
+ * Instrument tape of completed sweeps over the last hour: one tick per sweep,
+ * tall ticks for low tilts. The fixed needle on the right is "now".
+ */
 @Composable
-private fun TimeTape(modifier: Modifier = Modifier) {
+private fun TimeTape(ticks: List<ScanTick>, now: Long, modifier: Modifier = Modifier) {
     val c = Hookline.colors
-    Canvas(modifier.semantics { contentDescription = "Loop timeline, drag to scrub" }) {
-        val pattern = floatArrayOf(1f, 0.73f, 0.53f, 1f, 0.4f, 0.3f, 0.23f)
-        val step = 6.dp.toPx()
-        val base = size.height - 14.dp.toPx()
-        val maxH = 30.dp.toPx()
-        var x = 0f; var i = 0
-        while (x < size.width) {
-            val past = x < size.width / 2
-            drawLine(
-                if (past) c.inkSecondary else c.hairline,
-                start = androidx.compose.ui.geometry.Offset(x, base),
-                end = androidx.compose.ui.geometry.Offset(x, base - maxH * pattern[i % pattern.size]),
-                strokeWidth = 2.dp.toPx(),
-            )
-            x += step; i++
+    Canvas(modifier.semantics { contentDescription = "${ticks.size} scans received in the last hour" }) {
+        val base = size.height - 6.dp.toPx()
+        val maxH = size.height - 10.dp.toPx()
+        val windowMs = 60 * 60 * 1000f
+        drawLine(c.hairline, Offset(0f, base), Offset(size.width, base), strokeWidth = 1.dp.toPx())
+        for (t in ticks) {
+            val x = size.width * (1f - (now - t.endMillis) / windowMs)
+            if (x < 0f) continue
+            val h = maxH * (1f - (t.tilt / 20f)).coerceIn(0.25f, 1f)
+            drawLine(c.inkSecondary, Offset(x, base), Offset(x, base - h), strokeWidth = 2.dp.toPx())
         }
-        drawLine(
-            c.ink,
-            start = androidx.compose.ui.geometry.Offset(size.width / 2, 0f),
-            end = androidx.compose.ui.geometry.Offset(size.width / 2, base),
-            strokeWidth = 2.dp.toPx(),
-        )
+        drawLine(c.ink, Offset(size.width - 1.dp.toPx(), 0f), Offset(size.width - 1.dp.toPx(), base), strokeWidth = 2.dp.toPx())
     }
 }
 
 @Composable
 private fun Legend(product: Product) {
     val c = Hookline.colors
-    val (label, colors) = when (product) {
-        Product.VEL, Product.SRV -> "m/s" to listOf(Color(0xFFAADCFF), Color(0xFF2878FF), Color(0xFF465060), Color(0xFFA0460A), Color(0xFFFF8C14))
-        else -> "dBZ" to listOf(
-            Color(0xFF04E9E7), Color(0xFF019FF4), Color(0xFF0300F4), Color(0xFF02FD02), Color(0xFF01C501), Color(0xFF008E00),
-            Color(0xFFFDF802), Color(0xFFE5BC00), Color(0xFFFD9500), Color(0xFFFD0000), Color(0xFFD40000), Color(0xFFBC0000),
-            Color(0xFFF800FD), Color(0xFF9854C6),
-        )
+    val lut = remember(product) {
+        product.palette.toLut(product.min, product.max, 24).filter { (it ushr 24) != 0 }.map { Color(it) }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = Hookline.type.caption, color = c.inkSecondary, modifier = Modifier.width(34.dp))
-        Box(Modifier.weight(1f).height(6.dp).background(Brush.horizontalGradient(colors), RoundedCornerShape(3.dp)))
+        Text(
+            when (product) { Product.REF -> "dBZ"; Product.VEL, Product.SRV -> "m/s"; Product.CC -> "CC"; Product.ZDR -> "dB" },
+            style = Hookline.type.caption, color = c.inkSecondary, modifier = Modifier.width(34.dp),
+        )
+        if (lut.size >= 2) Box(Modifier.weight(1f).height(6.dp).background(Brush.horizontalGradient(lut), RoundedCornerShape(3.dp)))
         Spacer(Modifier.width(4.dp))
     }
 }

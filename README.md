@@ -42,7 +42,18 @@ Requirements: JDK 17, Android SDK 35.
 CI (GitHub Actions) runs both on every push and uploads the debug APK as an artifact.
 
 ## Status
-Pre-alpha scaffold (milestone M0 in the spec). Working: Level II Message 31 decoding with tests, palette parsing, beam geometry, storm-relative velocity, NWS alert parsing + polygon checks, S3 chunk discovery, Storm Mode plumbing, and a map screen rendering a synthetic storm. Next: GL radial renderer, MapLibre base map, live chunk streaming.
+Alpha (milestone M1 in progress).
+
+Working now:
+- **Live radar**: streams NEXRAD Level II real-time chunks straight from NOAA's public bucket and shows each tilt the moment it finishes scanning. Handles split cuts, SAILS re-scans and the 1–999 volume-number wraparound.
+- **GPU renderer**: OpenGL ES 3, one wedge per radial, R32F value texture sampled nearest-bin, palette LUT in the shader. Pinch, pan, double-tap zoom.
+- **Products**: REF, VEL, storm-relative velocity, CC, ZDR, every available tilt.
+- **Inspector**: long-press any point for the value, a plain-English meaning and beam height.
+- **Warnings**: active tornado, severe and flash-flood warning outlines on the map; banner when one covers your Home place.
+- **Offline fallback**: a clearly labelled synthetic demo storm when the feed can't be reached.
+- Storm Mode background checks, 15 starter radar sites, palette import, tests for decoder, assembler, renderer maths and data layer.
+
+Next: MapLibre base map with offline regions, loops, the full site list, NWS storm-motion for SRV, legacy Message 1 for pre-2008 archives.
 
 ## Data
 Radar and warning data courtesy of NOAA / National Weather Service, accessed via the NOAA Open Data Dissemination program on AWS and api.weather.gov. Hookline is not affiliated with or endorsed by NOAA or the NWS, and it is not an official warning service.
