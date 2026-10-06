@@ -1,9 +1,12 @@
 name: Test release
 
-# Push a tag like v0.2.0 to publish a downloadable APK on the Releases page.
+# Every push to main publishes a downloadable test APK on the Releases page,
+# tagged v<versionName>-build<run number>. (Tags pushed by hand work too.)
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,12 +29,23 @@ jobs:
         run: ./gradlew :core:radar:test :core:data:test :app:assembleDebug --stacktrace
 
       - name: Name the APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk "hookline-${GITHUB_REF_NAME}-debug.apk"
+        id: name
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+            TAG="v${VERSION}-build${GITHUB_RUN_NUMBER}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/debug/app-debug.apk "hookline-${TAG}-debug.apk"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: Hookline ${{ github.ref_name }} (test build)
+          tag_name: ${{ steps.name.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Hookline ${{ steps.name.outputs.tag }} (test build)
           prerelease: true
           files: hookline-*-debug.apk
           body: |
