@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "app.couplet.radar.core.designsystem"
+    namespace = "app.hookline.radar.core.designsystem"
     compileSdk = 35
     defaultConfig { minSdk = 26 }
     buildFeatures { compose = true }

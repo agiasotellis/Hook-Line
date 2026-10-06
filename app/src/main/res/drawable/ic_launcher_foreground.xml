@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Couplet mark: two opposed half-discs (inbound / outbound) inside a scan ring. -->
+<!-- Hookline mark: a hook echo curling inside a scan ring. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#00000000" android:strokeColor="#ECE8DF" android:strokeWidth="3"
-        android:pathData="M54,30a24,24 0 1,1 0,48a24,24 0 1,1 0,-48z" />
-    <path android:fillColor="#ECE8DF" android:pathData="M52,40a14,14 0 0,0 0,28z" />
-    <path android:fillColor="#9AA5AE" android:pathData="M56,40a14,14 0 0,1 0,28z" />
+    <path android:fillColor="#00000000" android:strokeColor="#9AA5AE" android:strokeWidth="2.5"
+        android:pathData="M54,28a26,26 0 1,1 0,52a26,26 0 1,1 0,-52z" />
+    <path android:fillColor="#00000000" android:strokeColor="#ECE8DF" android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:pathData="M66,40C60,44 56,50 56,57c0,6 -4,9 -8,9c-4,0 -6,-3 -6,-6c0,-3 2,-5 5,-5" />
 </vector>

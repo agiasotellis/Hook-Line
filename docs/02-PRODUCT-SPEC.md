@@ -1,6 +1,6 @@
-# Couplet — Product Spec (v1.0)
+# Hookline — Product Spec (v1.0)
 
-> Working name. "Couplet" nods to the velocity couplet, the signature of a rotating storm. Check trademark/Play availability before launch.
+> **Hookline** is named after the hook echo, the curl of rain that wraps around a rotating storm on radar. No radar app with this name turned up in a web search (Oct 2026); run a formal trademark and Play Store check before launch.
 
 ## 1. Who it's for
 

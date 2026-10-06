@@ -10,12 +10,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <application
-        android:name=".CoupletApp"
+        android:name=".HooklineApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Couplet">
+        android:theme="@style/Theme.Hookline">
 
         <activity
             android:name=".MainActivity"

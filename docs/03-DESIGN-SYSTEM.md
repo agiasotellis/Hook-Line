@@ -1,10 +1,10 @@
-# Couplet — Design System
+# Hookline — Design System
 
 ## The one rule
 **The map is the only colour.** Radar palettes already use every hue on the wheel — cyan through magenta. Any coloured UI chrome will collide with data and get misread (is that yellow button 45 dBZ?). So the interface is strictly neutral; state is shown with **fill, weight, shape and position**, never hue. The only coloured UI elements are NWS hazard colours on alerts, and they always carry a text label and a pattern so they can't be confused with data.
 
 ## Concept: road instrument
-Couplet is used from a car seat at dusk. Its visual language borrows from **highway signage and vehicle instruments**: semi-condensed sign-face type, generous hit areas, a tape-style time scrubber like an altimeter, and labels that read at a glance through rain on the windshield.
+Hookline is used from a car seat at dusk. Its visual language borrows from **highway signage and vehicle instruments**: semi-condensed sign-face type, generous hit areas, a tape-style time scrubber like an altimeter, and labels that read at a glance through rain on the windshield.
 
 ## Colour
 

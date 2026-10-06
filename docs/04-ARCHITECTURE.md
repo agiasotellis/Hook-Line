@@ -1,4 +1,4 @@
-# Couplet — Architecture
+# Hookline — Architecture
 
 ## Goals that drive the design
 1. **No backend required.** Every data product comes straight from public NOAA/NWS endpoints. Zero marginal cost per user is what makes a one-time price work.

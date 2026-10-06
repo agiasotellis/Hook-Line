@@ -69,7 +69,7 @@ Ranked by how much they hurt users and how cheaply we can beat them.
 
 ## 5. Positioning statement
 
-> **Couplet** is the professional radar you buy once. Every product, every tilt, every warning, thirty years of archive — no tiers, no subscriptions, no account.
+> **Hookline** is the professional radar you buy once. Every product, every tilt, every warning, thirty years of archive — no tiers, no subscriptions, no account.
 
 ## 6. Pricing recommendation
 

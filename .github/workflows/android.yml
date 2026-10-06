@@ -36,7 +36,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: couplet-debug-apk
+          name: hookline-debug-apk
           path: app/build/outputs/apk/debug/*.apk
 
       - name: Upload test reports

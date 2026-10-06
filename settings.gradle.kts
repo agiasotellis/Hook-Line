@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "couplet-radar"
+rootProject.name = "hookline-radar"
 
 include(":app")
 include(":core:radar")
