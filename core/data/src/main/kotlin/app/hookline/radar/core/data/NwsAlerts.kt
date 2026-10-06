@@ -22,6 +22,30 @@ import java.util.Locale
 
 data class LatLon(val lat: Double, val lon: Double)
 
+/**
+ * Storm motion from a warning's TIME...MOT...LOC line, e.g.
+ * "2026-05-06T23:28:00-00:00...storm...242DEG...35KT...35.12,-97.85".
+ * Direction is where the storm is moving FROM (meteorological convention).
+ */
+data class StormMotion(val fromDeg: Int, val speedKt: Int, val positions: List<LatLon>, val time: Instant?) {
+    val speedMs: Float get() = speedKt * 0.514444f
+
+    companion object {
+        private val MOT = Regex("""(\d{1,3})DEG\.\.\.(\d{1,3})KT\.\.\.([-0-9., ]+)""", RegexOption.IGNORE_CASE)
+
+        fun parse(text: String?): StormMotion? {
+            if (text.isNullOrBlank()) return null
+            val m = MOT.find(text) ?: return null
+            val time = text.substringBefore("...").trim().let { t ->
+                runCatching { java.time.OffsetDateTime.parse(t).toInstant() }.getOrNull()
+            }
+            val nums = m.groupValues[3].split(Regex("[ ,]+")).mapNotNull { it.trim('.').toDoubleOrNull() }
+            val pts = nums.chunked(2).filter { it.size == 2 }.map { LatLon(it[0], it[1]) }
+            return StormMotion(m.groupValues[1].toInt() % 360, m.groupValues[2].toInt(), pts, time)
+        }
+    }
+}
+
 enum class Hazard { TORNADO_WARNING, TORNADO_EMERGENCY, SEVERE_WARNING, FLASH_FLOOD_WARNING, TORNADO_WATCH, SEVERE_WATCH, OTHER }
 
 data class Alert(
@@ -37,6 +61,7 @@ data class Alert(
     val tornadoDetection: String? = null,
     val maxHailInches: Double? = null,
     val maxWindMph: Int? = null,
+    val motion: StormMotion? = null,
 ) {
     val hazard: Hazard
         get() = when {
@@ -108,6 +133,7 @@ class NwsAlerts(
                     tornadoDetection = params.firstParam("tornadoDetection"),
                     maxHailInches = params.firstParam("maxHailSize")?.toDoubleOrNull(),
                     maxWindMph = params.firstParam("maxWindGust")?.filter { it.isDigit() }?.toIntOrNull(),
+                    motion = StormMotion.parse(params.firstParam("eventMotionDescription")),
                 )
             }
         }

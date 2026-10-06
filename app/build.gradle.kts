@@ -12,8 +12,8 @@ android {
         applicationId = "app.hookline.radar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         // NWS asks every client to identify itself with contact info.
         buildConfigField("String", "NWS_USER_AGENT", "\"HooklineRadar/0.1 (support@hookline.app)\"")
     }
@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.work.runtime)
     implementation(libs.okhttp)
+    implementation(libs.maplibre.android)
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit)

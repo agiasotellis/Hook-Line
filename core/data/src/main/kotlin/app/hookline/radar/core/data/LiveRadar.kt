@@ -162,3 +162,46 @@ class LiveRadar(
 
     private fun backoff(attempt: Int): Long = (5_000L * (1 shl (attempt - 1).coerceIn(0, 4))).coerceAtMost(60_000L)
 }
+
+/** The lowest-tilt sweeps recovered from one earlier volume. */
+data class BackfillFrame(val volume: Int, val reflectivity: Sweep?, val velocity: Sweep?)
+
+/**
+ * Fills the loop with the 0.5° sweeps of earlier volumes still held in the
+ * real-time bucket. Only the first few chunks of each volume are fetched —
+ * the lowest tilt is scanned first — so a frame costs roughly 1–2 MB instead
+ * of a 10–20 MB full volume. Newest first, so the loop fills from "now" back.
+ */
+class LoopBackfill(
+    private val store: ChunkStore,
+    private val decode: (ByteArray) -> List<Radial> = Level2Decoder::decodeRadials,
+    private val maxChunksPerVolume: Int = 6,
+) {
+    fun frames(site: String, latestVolume: Int, count: Int): Flow<BackfillFrame> = flow {
+        var v = latestVolume
+        repeat(count) {
+            v = previousVolume(v)
+            val chunks = try { store.chunks(site, v) } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
+            if (chunks.isEmpty()) return@flow // reached the end of what the bucket keeps
+            val asm = VolumeAssembler()
+            for (c in chunks.take(maxChunksPerVolume)) {
+                try {
+                    asm.accept(v, decode(store.fetch(c)))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    break
+                }
+                if (asm.sweep(LOOP_TILT, Moment.REFLECTIVITY) != null && asm.sweep(LOOP_TILT, Moment.VELOCITY) != null) break
+            }
+            val ref = asm.sweep(LOOP_TILT, Moment.REFLECTIVITY)
+            val vel = asm.sweep(LOOP_TILT, Moment.VELOCITY)
+            if (ref != null || vel != null) emit(BackfillFrame(v, ref, vel))
+        }
+    }
+
+    companion object {
+        const val LOOP_TILT = 0.5f
+        fun previousVolume(v: Int): Int = if (v <= 1) NexradSource.MAX_VOLUME else v - 1
+    }
+}

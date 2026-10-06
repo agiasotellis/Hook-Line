@@ -30,7 +30,8 @@ class DataTest {
             "parameters": {
               "tornadoDetection": ["RADAR INDICATED"],
               "maxHailSize": ["1.75"],
-              "maxWindGust": ["60 MPH"]
+              "maxWindGust": ["60 MPH"],
+              "eventMotionDescription": ["2026-05-06T00:12:00-00:00...storm...242DEG...35KT...35.30,-97.55 35.28,-97.60"]
             }
           }
         },
@@ -60,6 +61,18 @@ class DataTest {
         assertEquals(Hazard.TORNADO_WATCH, watch.hazard)
         assertTrue(watch.polygons.isEmpty())
         assertNull(watch.expires)
+    }
+
+    @Test
+    fun parsesStormMotion() {
+        val m = NwsAlerts.parse(sample)[0].motion!!
+        assertEquals(242, m.fromDeg)
+        assertEquals(35, m.speedKt)
+        assertEquals(2, m.positions.size)
+        assertEquals(-97.55, m.positions[0].lon, 1e-9)
+        assertEquals(18.0f, m.speedMs, 0.1f)
+        assertNull(StormMotion.parse("no motion here"))
+        assertNull(NwsAlerts.parse(sample)[1].motion)
     }
 
     @Test

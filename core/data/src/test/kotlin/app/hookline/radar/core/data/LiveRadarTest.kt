@@ -103,4 +103,31 @@ class LiveRadarTest {
         val e = LiveRadar(store, pollMillis = 1).stream("KTLX").filterIsInstance<LiveEvent.Trouble>().first()
         assertEquals("offline", e.message)
     }
+
+    @Test
+    fun backfillWalksBackThroughEarlierVolumesAcrossWrap() = runBlocking {
+        val store = object : ChunkStore {
+            override suspend fun volumes(site: String) = listOf(998, 999, 1, 2)
+            override suspend fun chunks(site: String, volume: Int) =
+                if (volume in setOf(998, 999, 1)) listOf(
+                    NexradSource.Chunk("KTLX/$volume/20261006-190000-001-S", volume, 1, 'S'),
+                    NexradSource.Chunk("KTLX/$volume/20261006-190030-002-I", volume, 2, 'I'),
+                    NexradSource.Chunk("KTLX/$volume/20261006-190100-003-I", volume, 3, 'I'),
+                ) else emptyList()
+            var fetched = 0
+            override suspend fun fetch(chunk: NexradSource.Chunk): ByteArray { fetched++; return chunk.key.toByteArray() }
+        }
+        val decode: (ByteArray) -> List<Radial> = { b ->
+            when (String(b).substringAfterLast('-')) {
+                "S" -> cut(1, 0.5f, Moment.REFLECTIVITY)
+                else -> cut(2, 0.5f, Moment.VELOCITY)
+            }
+        }
+        val frames = LoopBackfill(store, decode).frames("KTLX", latestVolume = 2, count = 5).toList()
+        // 1, 999, 998 have data; 997 is missing so backfill stops there.
+        assertEquals(listOf(1, 999, 998), frames.map { it.volume })
+        assertTrue(frames.all { it.reflectivity != null && it.velocity != null })
+        // Stops after two chunks per volume once both 0.5° moments are complete.
+        assertEquals(6, store.fetched)
+    }
 }

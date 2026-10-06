@@ -25,29 +25,41 @@ class SweepTexture private constructor(
     val startMillis: Long,
     val endMillis: Long,
 ) {
-    /** Interleaved x, y (metres east/north of the site), u, v — six vertices per radial. */
-    fun wedgeMesh(): FloatArray {
+    /**
+     * Interleaved x, y, u, v — six vertices per radial. Positions are Web
+     * Mercator metres relative to the site when [projector] is given (live map),
+     * or flat metres east/north otherwise (tests, widgets).
+     */
+    fun wedgeMesh(projector: MercatorProjector? = null): FloatArray {
         val out = FloatArray(radialCount * 6 * 4)
-        val r0 = RadialGeometry.groundRangeMeters(firstGateMeters - gateSpacingMeters / 2.0, elevationDeg.toDouble()).toFloat()
+        val r0 = RadialGeometry.groundRangeMeters(firstGateMeters - gateSpacingMeters / 2.0, elevationDeg.toDouble())
         val r1 = RadialGeometry.groundRangeMeters(
             firstGateMeters - gateSpacingMeters / 2.0 + gateCount.toDouble() * gateSpacingMeters, elevationDeg.toDouble(),
-        ).toFloat()
+        )
+        fun corner(azDeg: Double, r: Double): Pair<Float, Float> {
+            if (projector != null) {
+                val (x, y) = projector.fromPolar(azDeg, r)
+                return x.toFloat() to y.toFloat()
+            }
+            val a = Math.toRadians(azDeg)
+            return (r * sin(a)).toFloat() to (r * cos(a)).toFloat()
+        }
         var k = 0
         for (i in 0 until radialCount) {
-            val half = spacings[i] / 2f
-            val a0 = Math.toRadians((azimuths[i] - half).toDouble())
-            val a1 = Math.toRadians((azimuths[i] + half).toDouble())
+            val half = spacings[i] / 2.0
             val v = (i + 0.5f) / radialCount
-            val s0 = sin(a0).toFloat(); val c0 = cos(a0).toFloat()
-            val s1 = sin(a1).toFloat(); val c1 = cos(a1).toFloat()
+            val (ilx, ily) = corner(azimuths[i] - half, r0)
+            val (irx, iry) = corner(azimuths[i] + half, r0)
+            val (olx, oly) = corner(azimuths[i] - half, r1)
+            val (orx, ory) = corner(azimuths[i] + half, r1)
             // inner-left, outer-left, outer-right, inner-left, outer-right, inner-right
             val verts = floatArrayOf(
-                r0 * s0, r0 * c0, 0f, v,
-                r1 * s0, r1 * c0, 1f, v,
-                r1 * s1, r1 * c1, 1f, v,
-                r0 * s0, r0 * c0, 0f, v,
-                r1 * s1, r1 * c1, 1f, v,
-                r0 * s1, r0 * c1, 0f, v,
+                ilx, ily, 0f, v,
+                olx, oly, 1f, v,
+                orx, ory, 1f, v,
+                ilx, ily, 0f, v,
+                orx, ory, 1f, v,
+                irx, iry, 0f, v,
             )
             verts.copyInto(out, k)
             k += verts.size
@@ -58,6 +70,11 @@ class SweepTexture private constructor(
     /** Physical value at a point (metres east/north of site), or null outside the data. */
     fun valueAt(eastM: Double, northM: Double): Float? {
         val (az, range) = RadialGeometry.polarOf(eastM, northM)
+        return valueAtPolar(az, range)
+    }
+
+    /** Value at an azimuth (deg) and ground range (m) from the site. */
+    fun valueAtPolar(az: Double, range: Double): Float? {
         val i = radialIndexFor(az.toFloat()) ?: return null
         val g = ((range - firstGateMeters + gateSpacingMeters / 2.0) / gateSpacingMeters).toInt()
         if (g < 0 || g >= gateCount) return null
@@ -83,6 +100,15 @@ class SweepTexture private constructor(
         /** Encoded sentinels: GLSL can't test for infinities portably. */
         const val BELOW = -1.0e30f
         const val FOLDED = 1.0e30f
+
+        internal fun of(
+            moment: Moment, elevationDeg: Float, radialCount: Int, gateCount: Int, firstGateMeters: Int,
+            gateSpacingMeters: Int, azimuths: FloatArray, spacings: FloatArray, values: FloatArray,
+            startMillis: Long, endMillis: Long,
+        ) = SweepTexture(
+            moment, elevationDeg, radialCount, gateCount, firstGateMeters, gateSpacingMeters,
+            azimuths, spacings, values, startMillis, endMillis,
+        )
 
         fun encode(v: Float): Float = when {
             v == Gate.RANGE_FOLDED -> FOLDED

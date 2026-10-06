@@ -9,6 +9,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write # post build errors as a commit comment
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -23,11 +26,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit tests (radar decoder, data layer)
-        run: ./gradlew :core:radar:test :core:data:test --stacktrace
-
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Unit tests and debug APK
+        run: |
+          set -o pipefail
+          ./gradlew :core:radar:test :core:data:test :app:assembleDebug --continue 2>&1 | tee build.log
 
       - name: Lint (report only)
         run: ./gradlew :app:lintDebug
@@ -45,3 +47,24 @@ jobs:
         with:
           name: test-reports
           path: '**/build/reports/tests/'
+
+      # Compile errors and failing tests go to a commit comment so they can be
+      # read through the API without downloading logs.
+      - name: Report failure on the commit
+        if: failure() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '### Build failed'
+            echo '```'
+            grep -E '^e: |^w: .*(unresolved|type mismatch)|error:|FAILED|What went wrong|AssertionError|expected:<|Exception' build.log | head -150
+            echo '```'
+            echo '<details><summary>Last 80 lines</summary>'
+            echo
+            echo '```'
+            tail -80 build.log
+            echo '```'
+            echo '</details>'
+          } > report.md
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@report.md

@@ -2,6 +2,7 @@ package app.hookline.radar.render
 
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView
+import app.hookline.radar.core.radar.MercatorProjector
 import app.hookline.radar.core.radar.Palette
 import app.hookline.radar.core.radar.SweepTexture
 import app.hookline.radar.core.radar.ThickLines
@@ -18,10 +19,12 @@ data class RadarFrame(
     val palette: Palette,
     val minValue: Float,
     val maxValue: Float,
+    /** Places the radar on the Web Mercator map; positions are metres relative to the site. */
+    val projector: MercatorProjector,
 )
 
-/** A warning or watch outline in metres east/north of the site. */
-data class Outline(val points: FloatArray, val argb: Int, val widthPx: Float)
+/** A polyline in Web Mercator metres relative to the site: warning outlines, storm tracks. */
+class Outline(val points: FloatArray, val argb: Int, val widthPx: Float, val closed: Boolean = true)
 
 /**
  * Draws radials in native polar form: one wedge per radial, a R32F value
@@ -40,6 +43,7 @@ class RadarRenderer : GLSurfaceView.Renderer {
     @Volatile private var clearArgb: Int = 0xFF141B22.toInt()
     private var ringCache = FloatArray(0)
     private var ringCacheMpp = -1f
+    private var ringProjector: MercatorProjector? = null
 
     private var radialProgram = 0
     private var lineProgram = 0
@@ -49,6 +53,7 @@ class RadarRenderer : GLSurfaceView.Renderer {
     private var meshVertexCount = 0
     private var current: RadarFrame? = null
     private var uploadedSweep: SweepTexture? = null
+    private var uploadedProjector: MercatorProjector? = null
     private var uploadedPalette: Palette? = null
     private var lineVbo = 0
 
@@ -67,7 +72,7 @@ class RadarRenderer : GLSurfaceView.Renderer {
         val bufs = IntArray(2); GLES30.glGenBuffers(2, bufs, 0)
         meshVbo = bufs[0]; lineVbo = bufs[1]
         // Context was (re)created: force re-upload of whatever we last had.
-        uploadedSweep = null; uploadedPalette = null
+        uploadedSweep = null; uploadedPalette = null; uploadedProjector = null
         pendingFrame = pendingFrame ?: current
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
@@ -115,11 +120,11 @@ class RadarRenderer : GLSurfaceView.Renderer {
             GLES30.glDisableVertexAttribArray(1)
         }
 
-        drawLines(vp, sx, sy, cx, cy)
+        drawLines(vp, sx, sy, cx, cy, current?.projector)
     }
 
     /** Range rings (every 50 km) and alert outlines, rebuilt each frame at the current zoom (cheap). */
-    private fun drawLines(vp: Viewport, sx: Float, sy: Float, cx: Float, cy: Float) {
+    private fun drawLines(vp: Viewport, sx: Float, sy: Float, cx: Float, cy: Float, projector: MercatorProjector?) {
         GLES30.glUseProgram(lineProgram)
         GLES30.glUniform2f(GLES30.glGetUniformLocation(lineProgram, "u_center"), cx, cy)
         GLES30.glUniform2f(GLES30.glGetUniformLocation(lineProgram, "u_scale"), sx, sy)
@@ -139,21 +144,29 @@ class RadarRenderer : GLSurfaceView.Renderer {
         }
 
         val mpp = vp.metersPerPixel.toFloat()
-        if (mpp != ringCacheMpp) {
-            val parts = (1..9).map { ThickLines.build(ThickLines.circle(it * 50_000f), true, 0.75f * mpp) }
+        if (projector != null && (mpp != ringCacheMpp || projector !== ringProjector)) {
+            val parts = (1..9).map { k ->
+                val pts = FloatArray(RING_SEGMENTS * 2)
+                for (i in 0 until RING_SEGMENTS) {
+                    val (x, y) = projector.fromPolar(360.0 * i / RING_SEGMENTS, k * 50_000.0)
+                    pts[i * 2] = x.toFloat(); pts[i * 2 + 1] = y.toFloat()
+                }
+                ThickLines.build(pts, true, 0.75f * mpp)
+            }
             ringCache = FloatArray(parts.sumOf { it.size }).also { out ->
                 var k = 0
                 for (p in parts) { p.copyInto(out, k); k += p.size }
             }
             ringCacheMpp = mpp
+            ringProjector = projector
         }
-        draw(ringCache, ringsArgb)
-        for (o in outlines) draw(ThickLines.build(o.points, true, o.widthPx / 2f * mpp), o.argb)
+        if (projector != null) draw(ringCache, ringsArgb)
+        for (o in outlines) draw(ThickLines.build(o.points, o.closed, o.widthPx / 2f * mpp), o.argb)
     }
 
     private fun upload(f: RadarFrame) {
         val s = f.sweep
-        if (s !== uploadedSweep) {
+        if (s !== uploadedSweep || f.projector !== uploadedProjector) {
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, valueTex)
             GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
             GLES30.glTexImage2D(
@@ -161,11 +174,12 @@ class RadarRenderer : GLSurfaceView.Renderer {
                 GLES30.GL_RED, GLES30.GL_FLOAT, GlUtil.floats(s.values),
             )
             GlUtil.nearestClamp()
-            val mesh = s.wedgeMesh()
+            val mesh = s.wedgeMesh(f.projector)
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, meshVbo)
             GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, mesh.size * 4, GlUtil.floats(mesh), GLES30.GL_STATIC_DRAW)
             meshVertexCount = mesh.size / 4
             uploadedSweep = s
+            uploadedProjector = f.projector
         }
         if (f.palette !== uploadedPalette) {
             val lut = f.palette.toLut(f.minValue, f.maxValue, LUT_SIZE)
@@ -184,6 +198,7 @@ class RadarRenderer : GLSurfaceView.Renderer {
 
     companion object {
         private const val LUT_SIZE = 256
+        private const val RING_SEGMENTS = 120
 
         private const val RADIAL_VS = """#version 300 es
 layout(location = 0) in vec2 a_pos;
