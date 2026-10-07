@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Hookline mark: a hook echo curling inside a scan ring. -->
+<!-- Hookline mark (oblique Hook H). Generated from tools/icon/gen.py; edit there. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#00000000" android:strokeColor="#9AA5AE" android:strokeWidth="2.5"
-        android:pathData="M54,28a26,26 0 1,1 0,52a26,26 0 1,1 0,-52z" />
-    <path android:fillColor="#00000000" android:strokeColor="#ECE8DF" android:strokeWidth="7"
-        android:strokeLineCap="round"
-        android:pathData="M66,40C60,44 56,50 56,57c0,6 -4,9 -8,9c-4,0 -6,-3 -6,-6c0,-3 2,-5 5,-5" />
+    <path android:fillColor="#FFE8E4DA" android:pathData="M37.30,30.94 L46.80,30.94 L39.50,77.06 L30.00,77.06 Z" />
+    <path android:fillColor="#FFE8E4DA" android:pathData="M42.65,48.57 L67.75,48.57 L66.35,57.39 L41.25,57.39 Z" />
+    <path android:fillColor="#FFE8E4DA" android:pathData="M68.50,30.94 L78.00,30.94 L72.74,64.17 L72.36,65.86 L71.77,67.51 L70.97,69.11 L69.99,70.62 L68.83,72.02 L67.52,73.29 L66.08,74.40 L64.53,75.33 L62.90,76.08 L61.21,76.62 L59.51,76.95 L57.81,77.06 L56.14,76.95 L54.54,76.62 L53.03,76.08 L51.64,75.33 L50.39,74.40 L49.29,73.29 L48.38,72.02 L47.67,70.62 L47.16,69.11 L46.87,67.51 L46.81,65.86 L46.96,64.17 L56.46,64.17 L56.42,64.62 L56.43,65.05 L56.51,65.47 L56.64,65.87 L56.83,66.24 L57.07,66.57 L57.36,66.86 L57.69,67.11 L58.06,67.31 L58.45,67.45 L58.87,67.54 L59.31,67.57 L59.76,67.54 L60.21,67.45 L60.65,67.31 L61.08,67.11 L61.49,66.86 L61.87,66.57 L62.21,66.24 L62.52,65.87 L62.78,65.47 L62.99,65.05 L63.14,64.62 L63.24,64.17 L68.50,30.94 Z" />
+    <path android:fillColor="#FFE4472F" android:pathData="M47.93,58.07 L57.42,58.07 L56.40,64.51 L46.91,64.51 Z" />
 </vector>

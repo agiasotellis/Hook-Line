@@ -88,7 +88,7 @@ fun HooklineSheet(onDismiss: () -> Unit, scroll: Boolean = true, content: @Compo
 @Composable
 fun MenuSheet(s: MapUiState, onPick: (Sheet) -> Unit, onDismiss: () -> Unit) {
     HooklineSheet(onDismiss) {
-        Text("Hookline", style = Hookline.type.title, color = Hookline.colors.ink)
+        BrandRow()
         val radar = when (s.mode) {
             Mode.SITE -> s.site?.let { "${it.label}, ${it.name}" + if (s.autoSite) " (auto)" else "" } ?: "Radar"
             Mode.COMPOSITE -> "Europe composite (auto)"
@@ -350,7 +350,7 @@ fun GuideSheet(onDismiss: () -> Unit) {
 @Composable
 fun AboutSheet(onDismiss: () -> Unit) {
     HooklineSheet(onDismiss) {
-        Heading("About Hookline")
+        BrandRow()
         Text("Version ${BuildConfig.VERSION_NAME}. One price, no subscription, no account, no ads.", style = Hookline.type.body, color = Hookline.colors.ink)
         Section(
             "Not an official warning service",
@@ -367,6 +367,18 @@ fun AboutSheet(onDismiss: () -> Unit) {
             "Hookline is not affiliated with or endorsed by any of these organisations.",
             style = Hookline.type.caption, color = Hookline.colors.inkSecondary,
         )
+    }
+}
+
+@Composable
+private fun BrandRow() {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(app.hookline.radar.R.drawable.ic_hookline_mark),
+            contentDescription = null,
+            modifier = Modifier.size(30.dp),
+        )
+        Text("Hookline", style = Hookline.type.title, color = Hookline.colors.ink)
     }
 }
 

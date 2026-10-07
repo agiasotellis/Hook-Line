@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hookline mark (oblique Hook H). Generated from tools/icon/gen.py; edit there. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="100" android:viewportHeight="100">
+    <path android:fillColor="#FFE8E4DA" android:pathData="M15.22,1.96 L35.00,1.96 L19.78,98.04 L0.00,98.04 Z" />
+    <path android:fillColor="#FFE8E4DA" android:pathData="M26.36,38.70 L78.64,38.70 L75.73,57.07 L23.45,57.07 Z" />
+    <path android:fillColor="#FFE8E4DA" android:pathData="M80.22,1.96 L100.00,1.96 L89.03,71.20 L88.25,74.70 L87.02,78.14 L85.36,81.47 L83.31,84.62 L80.90,87.54 L78.16,90.18 L75.16,92.49 L71.93,94.45 L68.53,96.00 L65.03,97.13 L61.47,97.81 L57.93,98.04 L54.47,97.81 L51.13,97.13 L47.98,96.00 L45.08,94.45 L42.47,92.49 L40.20,90.18 L38.30,87.54 L36.81,84.62 L35.76,81.47 L35.15,78.14 L35.01,74.70 L35.34,71.20 L55.12,71.20 L55.04,72.12 L55.07,73.02 L55.23,73.90 L55.51,74.73 L55.90,75.50 L56.40,76.19 L57.00,76.80 L57.68,77.31 L58.45,77.72 L59.28,78.02 L60.15,78.20 L61.07,78.26 L62.00,78.20 L62.93,78.02 L63.86,77.72 L64.75,77.31 L65.60,76.80 L66.39,76.19 L67.11,75.50 L67.75,74.73 L68.29,73.90 L68.72,73.02 L69.04,72.12 L69.25,71.20 L80.22,1.96 Z" />
+    <path android:fillColor="#FFE4472F" android:pathData="M37.35,58.48 L57.14,58.48 L55.01,71.90 L35.23,71.90 Z" />
+</vector>
