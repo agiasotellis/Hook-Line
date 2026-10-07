@@ -30,4 +30,11 @@ class RadarGlView(context: Context) : GLSurfaceView(context) {
     }
     fun setOutlines(list: List<Outline>) { renderer.setOutlines(list); requestRender() }
     fun setViewport(vp: Viewport) { renderer.setViewport(vp); requestRender() }
+    fun setRedNight(on: Boolean, clearArgb: Int) { renderer.setRedNight(on); renderer.setClearColor(clearArgb); requestRender() }
+
+    /** The radar layer as currently drawn (transparent where there's no echo is NOT kept: background included). */
+    suspend fun capture(): android.graphics.Bitmap = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        renderer.requestCapture { bmp -> post { if (cont.isActive) cont.resumeWith(Result.success(bmp)) } }
+        requestRender()
+    }
 }

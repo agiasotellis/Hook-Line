@@ -9,6 +9,8 @@ import app.hookline.radar.core.data.Alert
 import app.hookline.radar.core.data.Coverage
 import app.hookline.radar.core.data.DwdDualPol
 import app.hookline.radar.core.data.EumetsatLayers
+import app.hookline.radar.core.data.Fmt
+import app.hookline.radar.core.data.UnitSystem
 import app.hookline.radar.core.data.Imagery
 import app.hookline.radar.core.data.ImagerySource
 import app.hookline.radar.core.data.MeteoAlarm
@@ -143,6 +145,10 @@ data class MapUiState(
     val satellite: Boolean = true,
     /** Raster imagery for the base map (source, opacity). */
     val imagery: List<Pair<ImagerySource, Float>> = emptyList(),
+    val units: UnitSystem = UnitSystem.METRIC,
+    val redNight: Boolean = false,
+    /** Non-null while the measure tool is open. */
+    val measure: Measure? = null,
     val intensity: MapIntensity = MapIntensity(),
     val loopLength: Int = 12,
     val camera: CameraTarget? = null,
@@ -157,6 +163,9 @@ data class MapUiState(
 }
 
 data class Inspection(val value: String, val meaning: String, val height: String)
+
+/** Measuring between two taps: [a] first, then [b]. */
+data class Measure(val a: LatLon? = null, val b: LatLon? = null)
 
 class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("map", Context.MODE_PRIVATE)
@@ -191,6 +200,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             euMinLevel = checker.euMinLevel,
             showWarnings = prefs.getBoolean("show_warnings", true),
             satellite = prefs.getBoolean("satellite", true),
+            units = prefs.getString("units", null)?.let { runCatching { UnitSystem.valueOf(it) }.getOrNull() }
+                ?: UnitSystem.forCountry(Locale.getDefault().country),
+            redNight = prefs.getBoolean("red_night", false),
         ),
     )
     val state: StateFlow<MapUiState> = _state.asStateFlow()
@@ -293,6 +305,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         decideSource()
         if (_state.value.mode == Mode.COMPOSITE) refreshCompositeTile(force = false)
         updateVisibleWarnings()
+        if (_state.value.measure != null) rebuildOverlays()
         // New countries in view: fetch their warnings soon rather than at the next minute.
         regions?.let { r ->
             bounds?.let { b ->
@@ -455,6 +468,75 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(intensity = i) }
     }
 
+    fun setUnits(u: UnitSystem) {
+        prefs.edit().putString("units", u.name).apply()
+        _state.update { it.copy(units = u, inspector = null) }
+    }
+
+    fun setRedNight(on: Boolean) {
+        prefs.edit().putBoolean("red_night", on).apply()
+        _state.update { it.copy(redNight = on) }
+    }
+
+    // ---- measure tool ------------------------------------------------------------------
+
+    fun startMeasure() {
+        _state.update { it.copy(measure = Measure(), inspector = null) }
+        rebuildOverlays()
+    }
+
+    fun closeMeasure() {
+        _state.update { it.copy(measure = null) }
+        rebuildOverlays()
+    }
+
+    /** Map tap while measuring: first point, second point, then start over. */
+    fun measureTap(p: LatLon): Boolean {
+        val m = _state.value.measure ?: return false
+        val next = when {
+            m.a == null -> Measure(p, null)
+            m.b == null -> m.copy(b = p)
+            else -> Measure(p, null)
+        }
+        _state.update { it.copy(measure = next) }
+        rebuildOverlays()
+        return true
+    }
+
+    private fun measureOutlines(o: MercatorProjector): List<Outline> {
+        val m = _state.value.measure ?: return emptyList()
+        val out = mutableListOf<Outline>()
+        val ink = 0xFFECE8DF.toInt()
+        fun mark(p: LatLon) {
+            val pts = FloatArray(24)
+            for (i in 0 until 12) {
+                val (la, lo) = RadialGeometry.destination(p.lat, p.lon, i * 30.0, 2_500.0 * (1 + mapZoomScale()))
+                val (x, y) = o.fromLatLon(la, lo)
+                pts[i * 2] = x.toFloat(); pts[i * 2 + 1] = y.toFloat()
+            }
+            out += Outline(pts, ink, 2.5f)
+        }
+        m.a?.let(::mark)
+        m.b?.let(::mark)
+        val a = m.a; val b = m.b
+        if (a != null && b != null) {
+            // Great-circle path, sampled so it stays straight-looking on long lines.
+            val (brg, dist) = MercatorProjector.bearingDistance(a.lat, a.lon, b.lat, b.lon)
+            val n = 32
+            val pts = FloatArray((n + 1) * 2)
+            for (i in 0..n) {
+                val (la, lo) = RadialGeometry.destination(a.lat, a.lon, brg, dist * i / n)
+                val (x, y) = o.fromLatLon(la, lo)
+                pts[i * 2] = x.toFloat(); pts[i * 2 + 1] = y.toFloat()
+            }
+            out += Outline(pts, ink, 3f, closed = false)
+        }
+        return out
+    }
+
+    /** Marker size grows when zoomed out so it stays visible. */
+    private fun mapZoomScale(): Double = Math.pow(2.0, (8.0 - mapZoom).coerceIn(0.0, 6.0)) - 1
+
     fun setSatellite(on: Boolean) {
         prefs.edit().putBoolean("satellite", on).apply()
         _state.update { it.copy(satellite = on) }
@@ -512,8 +594,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             val loc = siteLocation ?: return
             val (brg, dist) = MercatorProjector.bearingDistance(loc.lat, loc.lon, at.latitude, at.longitude)
             val v = tex.valueAtPolar(brg, dist)
-            val heightFt = RadialGeometry.beamHeightMeters(dist, tex.elevationDeg.toDouble()) * 3.281
-            val height = "%,d ft above the radar, %.0f mi out".format(Locale.US, (heightFt / 10).roundToInt() * 10, dist / 1609.34)
+            val u = s.units
+            val height = Fmt.height(RadialGeometry.beamHeightMeters(dist, tex.elevationDeg.toDouble()), u) +
+                " above the radar, " + Fmt.distance(dist, u) + " out"
             _state.update { it.copy(inspector = describe(it.product, v, height)) }
         } else if (s.mode == Mode.COMPOSITE) {
             val g = compositeGrid ?: return
@@ -1007,6 +1090,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         if (_state.value.showWarnings) list += euOutlines(o)
+        list += measureOutlines(o)
         for (a in alerts) {
             if (!_state.value.showWarnings) break
             val (argb, width) = when (a.hazard) {
@@ -1100,11 +1184,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 height,
             )
             Product.VEL, Product.SRV -> {
-                val kt = (abs(v) * 1.944f).roundToInt()
                 val dir = if (v < 0) "toward the radar" else "away from the radar"
                 Inspection(
-                    "$kt kt $dir",
-                    if (kt >= 50) "Strong wind. Look for an opposite colour right next to it: that pair means rotation." else "Wind moving $dir.",
+                    Fmt.speed(abs(v).toDouble(), _state.value.units) + " " + dir,
+                    if (abs(v) >= 25.7f) "Strong wind. Look for an opposite colour right next to it: that pair means rotation." else "Wind moving $dir.",
                     height,
                 )
             }

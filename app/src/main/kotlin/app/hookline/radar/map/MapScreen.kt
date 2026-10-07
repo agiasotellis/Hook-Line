@@ -65,6 +65,7 @@ import app.hookline.radar.core.designsystem.Readout
 import app.hookline.radar.core.designsystem.SelectPill
 import app.hookline.radar.render.RadarGlView
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
@@ -85,6 +86,11 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val dataReady = s.siteLayer != null || s.compositeLayer != null || s.mode == Mode.MOSAIC ||
         s.status is FeedStatus.Stale || (s.mode == Mode.NONE && s.status is FeedStatus.NoCoverage)
     LaunchedEffect(mapReady, dataReady) { if (mapReady && dataReady) loadingDone = true }
+    var following by remember { mutableStateOf(false) }
+    var shareMenu by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val share = remember { ShareActions(context, radar, baseMap, vm) }
     var crash by remember { mutableStateOf(app.hookline.radar.CrashLog.read(context)) }
 
     // The map owns gestures; the radar follows its camera exactly.
@@ -94,16 +100,27 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         }
         baseMap.onCameraIdle = vm::onCameraIdle
         baseMap.onLongPress = vm::inspect
-        baseMap.onStyleLoaded = { mapReady = true }
+        baseMap.onStyleLoaded = { mapReady = true; baseMap.showLocation(context) }
+        baseMap.onTap = { p -> vm.measureTap(app.hookline.radar.core.data.LatLon(p.latitude, p.longitude)) }
+        baseMap.onFollowDismissed = { following = false }
     }
     LaunchedEffect(s.camera?.seq) { s.camera?.let { baseMap.moveTo(it.lat, it.lon, it.zoom) } }
     LaunchedEffect(s.intensity) { baseMap.setIntensity(s.intensity) }
     LaunchedEffect(s.imagery) { baseMap.setImagery(s.imagery) }
+    LaunchedEffect(s.redNight) {
+        baseMap.setRedNight(s.redNight)
+        radar.setRedNight(s.redNight, if (s.redNight) 0xFF0A0505.toInt() else 0xFF141B22.toInt())
+    }
 
     // Start where the user is (coarse location is enough to pick radars).
     val locationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-    ) { granted -> if (granted) DeviceLocation.request(context) { lat, lon -> vm.onLocation(lat, lon) } }
+    ) { granted ->
+        if (granted) {
+            DeviceLocation.request(context) { lat, lon -> vm.onLocation(lat, lon) }
+            baseMap.showLocation(context)
+        }
+    }
     LaunchedEffect(Unit) {
         if (DeviceLocation.hasPermission(context)) DeviceLocation.request(context) { lat, lon -> vm.onLocation(lat, lon) }
         else locationPermission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -170,6 +187,32 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             horizontalAlignment = Alignment.End,
         ) {
             TiltLadder(tilts = s.tilts, selected = s.tilt, onSelect = vm::selectTilt)
+            MapButton(if (following) "Stop following your location" else "Show and follow your location", active = following, onClick = {
+                if (!DeviceLocation.hasPermission(context)) {
+                    locationPermission.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                } else if (baseMap.showLocation(context)) {
+                    following = !following
+                    baseMap.setFollow(following)
+                }
+            }) { LocateIcon(it, following) }
+            MapButton("Measure distance", active = s.measure != null, onClick = {
+                if (s.measure == null) vm.startMeasure() else vm.closeMeasure()
+            }) { RulerIcon(it) }
+            Box {
+                MapButton("Share", onClick = { if (busy == null) shareMenu = true }) { ShareIcon(it) }
+                androidx.compose.material3.DropdownMenu(expanded = shareMenu, onDismissRequest = { shareMenu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text("Share picture", style = Hookline.type.control) },
+                        onClick = { shareMenu = false; scope.launch { runCatching { share.still { busy = it } } } },
+                    )
+                    val canLoop = s.loop.available && s.loop.frames.size >= 2
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(if (canLoop) "Share loop (GIF)" else "Share loop (needs a loop)", style = Hookline.type.control) },
+                        enabled = canLoop,
+                        onClick = { shareMenu = false; scope.launch { runCatching { share.loop { busy = it } } } },
+                    )
+                }
+            }
             ChromePanel(
                 Modifier.size(Dimens.MinTouch).clickable { sheet = Sheet.LAYERS }
                     .semantics { contentDescription = "Layers and offline maps" },
@@ -193,6 +236,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     onDismiss = { app.hookline.radar.CrashLog.clear(context); crash = null },
                 )
             }
+            busy?.let { Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { Chip(it, dot = true) } }
+            if (s.measure != null) MeasureCard(s, onClear = vm::startMeasure, onClose = vm::closeMeasure)
             s.inspector?.let { InspectorCard(it, onDismiss = vm::dismissInspector) }
             BottomDock(s, onProduct = vm::selectProduct, onPlay = vm::togglePlay, onScrub = vm::scrubTo)
         }
@@ -229,6 +274,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 onIntensity = vm::setIntensity,
                 onLoopLength = vm::setLoopLength,
                 onSatellite = vm::setSatellite,
+                onUnits = vm::setUnits,
+                onRedNight = vm::setRedNight,
                 onWarnings = vm::setShowWarnings,
                 onDownload = { baseMap.visibleBounds()?.let { b -> vm.downloadVisibleMap(b, density) } },
                 onDelete = { id -> vm.offline.delete(id) },
@@ -511,7 +558,7 @@ private fun Legend(s: MapUiState) {
         if (lut.size >= 2) Box(Modifier.weight(1f).height(6.dp).background(Brush.horizontalGradient(lut), RoundedCornerShape(3.dp)))
         if (product == Product.SRV) {
             Text(
-                "${s.motion.fromDeg}° at ${s.motion.speedKt} kt",
+                "${s.motion.fromDeg}° at ${app.hookline.radar.core.data.Fmt.speed(s.motion.speedKt * 0.514444, s.units)}",
                 style = Hookline.type.caption, color = c.inkSecondary,
             )
         }
@@ -531,6 +578,8 @@ private fun LayersSheet(
     onLoopLength: (Int) -> Unit,
     onSatellite: (Boolean) -> Unit,
     onWarnings: (Boolean) -> Unit,
+    onUnits: (app.hookline.radar.core.data.UnitSystem) -> Unit,
+    onRedNight: (Boolean) -> Unit,
     onDownload: () -> Unit,
     onDelete: (Long) -> Unit,
     onDismiss: () -> Unit,
@@ -549,6 +598,16 @@ private fun LayersSheet(
             Text("Layers", style = Hookline.type.title, color = c.ink)
             ToggleRow("Satellite where there's no radar", "Infrared clouds from GOES, Meteosat and Himawari", s.satellite, onSatellite)
             ToggleRow("Warnings on the map", "NWS in the US, MeteoAlarm in Europe", s.showWarnings, onWarnings)
+            ToggleRow("Night vision", "Everything in dim red, to keep your eyes adjusted outdoors", s.redNight, onRedNight)
+            Text("Units", style = Hookline.type.body, color = c.ink)
+            PillRow {
+                app.hookline.radar.core.data.UnitSystem.entries.forEach { u ->
+                    SelectPill(
+                        if (u == app.hookline.radar.core.data.UnitSystem.METRIC) "km, m, km/h" else "mi, ft, mph",
+                        selected = s.units == u, onClick = { onUnits(u) }, modifier = Modifier.weight(1f),
+                    )
+                }
+            }
             Spacer(Modifier.height(6.dp))
             Text("Map", style = Hookline.type.title, color = c.ink)
             LabeledSlider("Roads", intensity.roads, sliderColors) { onIntensity(intensity.copy(roads = it)) }

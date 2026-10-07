@@ -46,6 +46,10 @@ class BaseMap(context: Context) {
     /** Fires when the camera settles: centre, zoom and visible bounds. */
     var onCameraIdle: ((LatLng, Double, LatLngBounds?) -> Unit)? = null
     var onLongPress: ((LatLng) -> Unit)? = null
+    /** Single tap on the map; return true to consume it. */
+    var onTap: ((LatLng) -> Boolean)? = null
+    /** Follow-me ended because the user moved the map. */
+    var onFollowDismissed: (() -> Unit)? = null
     /** Fires once the map style has loaded (or immediately if it already has). */
     var onStyleLoaded: (() -> Unit)? = null
         set(v) { field = v; if (styleLoaded) v?.invoke() }
@@ -56,6 +60,9 @@ class BaseMap(context: Context) {
     private val labelLayers = mutableListOf<String>()
     private val borderLayers = mutableListOf<String>()
     private var intensity = MapIntensity()
+    private var ink = INK
+    private var ink2 = INK_2
+    private var voidColor = MAP_VOID
     private var pendingCamera: Pair<LatLng, Double>? = null
     private var imagery: List<Pair<ImagerySource, Float>> = emptyList()
     private val shownImagery = mutableListOf<String>()
@@ -87,6 +94,7 @@ class BaseMap(context: Context) {
                 onCameraMove?.invoke()
             }
             m.addOnMapLongClickListener { p -> onLongPress?.invoke(p); true }
+            m.addOnMapClickListener { p -> onTap?.invoke(p) ?: false }
             pendingCamera?.let { (t, z) -> m.moveCamera(CameraUpdateFactory.newLatLngZoom(t, z)) }
             pendingCamera = null
             onCameraMove?.invoke()
@@ -129,6 +137,56 @@ class BaseMap(context: Context) {
         )
     }
 
+    /** Night vision: roads, borders and names in dim red. */
+    fun setRedNight(on: Boolean) {
+        val (a, b, c) = if (on) Triple("#B8352E", "#6E211C", "#0A0505") else Triple(INK, INK_2, MAP_VOID)
+        if (a == ink) return
+        ink = a; ink2 = b; voidColor = c
+        map?.style?.let { st -> if (st.isFullyLoaded) runCatching { restyle(st, fresh = false) } }
+    }
+
+    /** Shows the device position (a dot with heading). Needs location permission. */
+    @android.annotation.SuppressLint("MissingPermission")
+    fun showLocation(context: Context): Boolean {
+        val m = map ?: return false
+        val st = m.style ?: return false
+        if (!DeviceLocation.hasPermission(context)) return false
+        return runCatching {
+            val lc = m.locationComponent
+            if (!lc.isLocationComponentActivated) {
+                lc.activateLocationComponent(
+                    org.maplibre.android.location.LocationComponentActivationOptions.builder(context, st)
+                        .useDefaultLocationEngine(true)
+                        .build(),
+                )
+                lc.addOnCameraTrackingChangedListener(object : org.maplibre.android.location.OnCameraTrackingChangedListener {
+                    override fun onCameraTrackingDismissed() { onFollowDismissed?.invoke() }
+                    override fun onCameraTrackingChanged(currentMode: Int) = Unit
+                })
+            }
+            lc.isLocationComponentEnabled = true
+            lc.renderMode = org.maplibre.android.location.modes.RenderMode.COMPASS
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Keeps the camera on the device position (north stays up). */
+    fun setFollow(on: Boolean) {
+        val lc = map?.locationComponent ?: return
+        if (!lc.isLocationComponentActivated) return
+        runCatching {
+            lc.cameraMode = if (on) org.maplibre.android.location.modes.CameraMode.TRACKING
+            else org.maplibre.android.location.modes.CameraMode.NONE
+        }
+    }
+
+    /** The base map (lines and names) as a bitmap, transparent elsewhere. */
+    suspend fun snapshot(): android.graphics.Bitmap? = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        val m = map
+        if (m == null) cont.resumeWith(Result.success(null))
+        else m.snapshot { bmp -> if (cont.isActive) cont.resumeWith(Result.success(bmp)) }
+    }
+
     fun setIntensity(i: MapIntensity) {
         intensity = i
         map?.style?.let { applyIntensity(it) }
@@ -169,35 +227,39 @@ class BaseMap(context: Context) {
         }
     }
 
-    private fun restyle(style: Style) {
+    private fun restyle(style: Style, fresh: Boolean = true) {
         roadLayers.clear(); labelLayers.clear(); borderLayers.clear()
         for (layer in style.layers) restyleLayer(layer)
         applyIntensity(style)
-        shownImagery.clear()
-        runCatching { applyImagery(style) }
+        if (fresh) {
+            shownImagery.clear()
+            runCatching { applyImagery(style) }
+        }
     }
 
     private fun restyleLayer(layer: Layer) {
+        // Our own imagery and the location dot are styled where they're added.
+        if (layer.id.startsWith("img-") || layer.id.contains("location")) return
         val hide = PropertyFactory.visibility(Property.NONE)
         when (layer) {
             is BackgroundLayer -> layer.setProperties(PropertyFactory.backgroundOpacity(0f))
             is FillExtrusionLayer -> layer.setProperties(hide)
             is FillLayer -> if (layer.sourceLayer == "water") {
-                layer.setProperties(PropertyFactory.fillColor(INK_2), PropertyFactory.fillOpacity(0.10f))
+                layer.setProperties(PropertyFactory.fillColor(ink2), PropertyFactory.fillOpacity(0.10f))
             } else {
                 layer.setProperties(hide) // land, landuse, buildings would hide the radar
             }
             is LineLayer -> when (layer.sourceLayer) {
-                "transportation" -> { layer.setProperties(PropertyFactory.lineColor(INK)); roadLayers += layer.id }
-                "boundary" -> { layer.setProperties(PropertyFactory.lineColor(INK)); borderLayers += layer.id }
-                "water", "waterway" -> layer.setProperties(PropertyFactory.lineColor(INK_2), PropertyFactory.lineOpacity(0.35f))
+                "transportation" -> { layer.setProperties(PropertyFactory.lineColor(ink)); roadLayers += layer.id }
+                "boundary" -> { layer.setProperties(PropertyFactory.lineColor(ink)); borderLayers += layer.id }
+                "water", "waterway" -> layer.setProperties(PropertyFactory.lineColor(ink2), PropertyFactory.lineOpacity(0.35f))
                 else -> layer.setProperties(hide)
             }
             is SymbolLayer -> when (layer.sourceLayer) {
                 "place", "transportation_name" -> {
                     layer.setProperties(
-                        PropertyFactory.textColor(INK),
-                        PropertyFactory.textHaloColor(MAP_VOID),
+                        PropertyFactory.textColor(ink),
+                        PropertyFactory.textHaloColor(voidColor),
                         PropertyFactory.textHaloWidth(1.5f),
                         PropertyFactory.iconOpacity(0f),
                     )

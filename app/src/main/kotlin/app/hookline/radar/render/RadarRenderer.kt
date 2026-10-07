@@ -58,6 +58,10 @@ class RadarRenderer : GLSurfaceView.Renderer {
     @Volatile private var viewport: Viewport = Viewport(1, 1)
     @Volatile private var outlines: List<Outline> = emptyList()
     @Volatile private var clearArgb: Int = 0xFF141B22.toInt()
+    @Volatile private var redNight = false
+    @Volatile private var captureRequest: ((android.graphics.Bitmap) -> Unit)? = null
+    private var surfaceW = 1
+    private var surfaceH = 1
 
     private var program = 0
     private var lineProgram = 0
@@ -69,6 +73,10 @@ class RadarRenderer : GLSurfaceView.Renderer {
     fun setOutlines(list: List<Outline>) { outlines = list }
     /** Map background behind the translucent base map. */
     fun setClearColor(argb: Int) { clearArgb = argb }
+    /** Night vision: everything drawn in shades of red. */
+    fun setRedNight(on: Boolean) { redNight = on }
+    /** Reads back the next frame (on the GL thread) as a bitmap. */
+    fun requestCapture(onDone: (android.graphics.Bitmap) -> Unit) { captureRequest = onDone }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         program = GlUtil.program(RASTER_VS, RASTER_FS)
@@ -92,11 +100,17 @@ class RadarRenderer : GLSurfaceView.Renderer {
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES30.glViewport(0, 0, width, height)
+        surfaceW = width; surfaceH = height
     }
 
     override fun onDrawFrame(gl: GL10?) {
         val bg = clearArgb
         GLES30.glClearColor(((bg shr 16) and 0xFF) / 255f, ((bg shr 8) and 0xFF) / 255f, (bg and 0xFF) / 255f, 1f)
+        val red = if (redNight) 1f else 0f
+        GLES30.glUseProgram(program)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "u_red"), red)
+        GLES30.glUseProgram(lineProgram)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(lineProgram, "u_red"), red)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
 
         val vp = viewport
@@ -113,6 +127,22 @@ class RadarRenderer : GLSurfaceView.Renderer {
             s.current?.let { draw(s, it, sx, sy, cx, cy) }
         }
         drawLines(vp, sx, sy, cx, cy)
+        captureRequest?.let { cb ->
+            captureRequest = null
+            cb(readPixels())
+        }
+    }
+
+    private fun readPixels(): android.graphics.Bitmap {
+        val w = surfaceW; val h = surfaceH
+        val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
+        GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
+        buf.position(0)
+        val raw = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        raw.copyPixelsFromBuffer(buf)
+        // GL rows run bottom-up.
+        val flip = android.graphics.Matrix().apply { preScale(1f, -1f) }
+        return android.graphics.Bitmap.createBitmap(raw, 0, 0, w, h, flip, false).also { raw.recycle() }
     }
 
     private fun draw(s: Slot, l: RasterLayer, sx: Float, sy: Float, cx: Float, cy: Float) {
@@ -239,6 +269,7 @@ uniform highp sampler2D u_values;
 uniform sampler2D u_lut;
 uniform vec2 u_range;
 uniform vec4 u_rf;
+uniform float u_red;
 out vec4 o_color;
 void main() {
     // Composite meshes extend past the data; nothing is drawn outside it.
@@ -253,6 +284,10 @@ void main() {
         c = texture(u_lut, vec2(t * (255.0 / 256.0) + 0.5 / 256.0, 0.5));
     }
     if (c.a < 0.01) discard;
+    if (u_red > 0.5) {
+        float l = dot(c.rgb, vec3(0.30, 0.59, 0.11));
+        c = vec4(0.25 + 0.75 * l, 0.03 * l, 0.02 * l, c.a);
+    }
     o_color = c;
 }"""
 
@@ -265,8 +300,16 @@ void main() { gl_Position = vec4((a_pos - u_center) * u_scale, 0.0, 1.0); }"""
         private const val LINE_FS = """#version 300 es
 precision mediump float;
 uniform vec4 u_color;
+uniform float u_red;
 out vec4 o_color;
-void main() { o_color = u_color; }"""
+void main() {
+    vec4 c = u_color;
+    if (u_red > 0.5) {
+        float l = dot(c.rgb, vec3(0.30, 0.59, 0.11));
+        c = vec4(0.2 + 0.8 * l, 0.03 * l, 0.02 * l, c.a);
+    }
+    o_color = c;
+}"""
     }
 }
 
