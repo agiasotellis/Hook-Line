@@ -283,6 +283,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private var compositeZoom = 0.0
     private val compositeBytes = TreeMap<Long, ByteArray>() // loop frames, compressed
     private var compositeLoopLayers: Map<Long, RasterLayer> = emptyMap()
+    private var loopLoadJob: Job? = null
     private var compositeKeys: List<OrdKey> = emptyList()
 
     // map
@@ -1012,14 +1013,14 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                         compositeGrid = grid
                         compositeLocator = withContext(Dispatchers.Default) { CompositeTile.Locator(grid) }
                         compositeKey = newest
-                        compositeBytes[newest.timeMillis] = bytes
-                        // Remember the other recent frames' keys for loops (downloaded on play).
+                        compositeBytes.clear()
+                        // Remember the other recent frames' keys for loops (downloaded on play, or ahead of time on Wi-Fi).
                         compositeKeys = keys
-                        while (compositeBytes.size > 12) compositeBytes.pollFirstEntry()
                         _state.update { it.copy(status = FeedStatus.Live) }
                         cellsFromComposite(grid)
                         refreshCompositeTile(force = true)
                         refreshLoopUi()
+                        maybePrefetchLoop()
                     }
                     attempt = 0
                 } catch (e: CancellationException) {
@@ -1040,6 +1041,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private fun stopComposite() {
         compositeJob?.cancel()
         compositeJob = null
+        loopLoadJob?.cancel(); loopLoadJob = null
         compositeLoopLayers = emptyMap()
     }
 
@@ -1061,15 +1063,22 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val dLat = (n - s) * 0.5; val dLon = (e - w) * 0.5
         val box = doubleArrayOf((s - dLat).coerceAtLeast(-85.0), w - dLon, (n + dLat).coerceAtMost(85.0), e + dLon)
         val origin = _state.value.origin
+        val previousBox = compositeBounds
         compositeTileJob?.cancel()
         compositeTileJob = viewModelScope.launch {
             val layer = withContext(Dispatchers.Default) {
                 CompositeTile.build(grid, loc, box[0], box[1], box[2], box[3], 2048, origin.siteLat, origin.siteLon, true)
                     ?.let { compositeLayer(it) }
             }
+            val sameArea = previousBox != null && previousBox.contentEquals(box)
             compositeBounds = box
             compositeZoom = mapZoom
-            compositeLoopLayers = emptyMap()
+            if (!sameArea) {
+                // Loop frames were cut for the old area.
+                loopLoadJob?.cancel(); loopLoadJob = null
+                compositeLoopLayers = emptyMap()
+            }
+            maybePrefetchLoop()
             if (_state.value.mode == Mode.COMPOSITE && _state.value.showingLatest) {
                 _state.update { it.copy(compositeLayer = layer, frameEndMillis = grid.endMillis) }
             }
@@ -1080,33 +1089,73 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         t.texWidth, t.texHeight, t.values, t.mesh, Product.REF.palette, Product.REF.min, Product.REF.max,
     )
 
-    /** Download and prepare the composite loop for the current view. */
-    private suspend fun prepareCompositeLoop(): Boolean {
-        val loc = compositeLocator ?: return false
-        val box = compositeBounds ?: return false
+    /**
+     * Loads the composite loop for the current view in the background: three
+     * frames at a time, newest first. Frames appear in the loop as they are
+     * ready, so playback can start long before the last one arrives. The
+     * newest frame reuses the composite already in memory.
+     */
+    private fun startCompositeLoopLoad(): Job? {
+        val loc = compositeLocator ?: return null
+        val box = compositeBounds ?: return null
         val origin = _state.value.origin
-        val keys = compositeKeys.sortedBy { it.timeMillis }
-        if (keys.size < 2) return false
-        val layers = HashMap<Long, RasterLayer>()
-        for ((i, k) in keys.withIndex()) {
-            setLoopLoading(tr("Loading loop %s/%s", i + 1, keys.size))
-            val bytes = compositeBytes[k.timeMillis] ?: opera.fetchBytes(k).also { compositeBytes[k.timeMillis] = it }
-            val layer = try {
-                withContext(Dispatchers.Default) {
-                    val g = OperaComposite.decode(bytes)
-                    CompositeTile.build(g, loc, box[0], box[1], box[2], box[3], 1024, origin.siteLat, origin.siteLon, true)?.let { compositeLayer(it) }
-                }
-            } catch (e: OutOfMemoryError) {
-                // Low-memory phone: loop the frames we already have rather than crash.
-                compositeBytes.clear()
-                break
-            } ?: continue
-            layers[k.timeMillis] = layer
-        }
-        setLoopLoading(null)
+        val keys = compositeKeys.sortedByDescending { it.timeMillis }
+        if (keys.size < 2) return null
+        val layers = java.util.concurrent.ConcurrentHashMap<Long, RasterLayer>(compositeLoopLayers)
+        val wanted = keys.map { it.timeMillis }.toSet()
+        layers.keys.retainAll(wanted) // frames that aged out of the loop window
         compositeLoopLayers = layers
-        _state.update { it.copy(loop = it.loop.copy(frames = layers.keys.sorted())) }
-        return layers.size >= 2
+        val missing = keys.filter { it.timeMillis !in layers }
+        if (missing.isEmpty()) return null
+        val gate = kotlinx.coroutines.sync.Semaphore(3)        // downloads in flight
+        val decodeGate = kotlinx.coroutines.sync.Semaphore(2)  // full-size decodes in memory at once
+        var lowMemory = false
+        fun publish() {
+            if (compositeLoopLayers !== layers) return
+            val done = layers.size
+            setLoopLoading(if (done < keys.size) tr("Loading loop %s/%s", done, keys.size) else null)
+            if (_state.value.loop.playing) _state.update { it.copy(loop = it.loop.copy(frames = layers.keys.sorted())) }
+        }
+        return viewModelScope.launch {
+            publish()
+            missing.map { k ->
+                launch {
+                    gate.acquire()
+                    try {
+                        if (lowMemory) return@launch
+                        val grid = compositeGrid?.takeIf { compositeKey?.key == k.key }
+                        val bytes = if (grid == null) opera.fetchBytes(k) else null
+                        decodeGate.acquire()
+                        val layer = try {
+                            withContext(Dispatchers.Default) {
+                                val g = grid ?: OperaComposite.decode(bytes!!)
+                                CompositeTile.build(g, loc, box[0], box[1], box[2], box[3], 1024, origin.siteLat, origin.siteLon, true)?.let { compositeLayer(it) }
+                            }
+                        } finally {
+                            decodeGate.release()
+                        }
+                        if (layer != null) { layers[k.timeMillis] = layer; publish() }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: OutOfMemoryError) {
+                        lowMemory = true // loop what we have rather than crash
+                    } catch (e: Exception) {
+                        // A missing frame just leaves a gap in the loop.
+                    } finally {
+                        gate.release()
+                    }
+                }
+            }.forEach { it.join() }
+            if (compositeLoopLayers === layers) setLoopLoading(null)
+        }
+    }
+
+    /** On Wi-Fi, get the loop ready while the user looks at the map, so Play starts instantly. */
+    private fun maybePrefetchLoop() {
+        if (_state.value.mode != Mode.COMPOSITE || loopLoadJob?.isActive == true) return
+        val cm = getApplication<Application>().getSystemService(android.net.ConnectivityManager::class.java) ?: return
+        if (cm.isActiveNetworkMetered) return
+        loopLoadJob = startCompositeLoopLoad()
     }
 
     // ---- loops (both modes) -------------------------------------------------------------------------
@@ -1131,8 +1180,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         playJob?.cancel()
         _state.update { it.copy(loop = it.loop.copy(playing = true)) }
         playJob = viewModelScope.launch {
-            if (_state.value.mode == Mode.COMPOSITE && compositeLoopLayers.size < 2) {
-                if (!prepareCompositeLoop()) { stopLoop(); return@launch }
+            if (_state.value.mode == Mode.COMPOSITE) {
+                if (loopLoadJob?.isActive != true && compositeLoopLayers.size < compositeKeys.size) loopLoadJob = startCompositeLoopLoad()
+                // Start as soon as a few frames are in; the rest join the loop as they arrive.
+                val enough = minOf(3, compositeKeys.size)
+                while (isActive && compositeLoopLayers.size < enough && loopLoadJob?.isActive == true) delay(100)
+                if (compositeLoopLayers.size < 2) { setLoopLoading(null); stopLoop(); return@launch }
+                _state.update { it.copy(loop = it.loop.copy(frames = compositeLoopLayers.keys.sorted())) }
             }
             _state.update { it.copy(loop = it.loop.copy(index = 0)) }
             showCurrent()

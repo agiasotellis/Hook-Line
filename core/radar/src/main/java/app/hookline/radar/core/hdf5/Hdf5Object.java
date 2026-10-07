@@ -405,6 +405,107 @@ public final class Hdf5Object {
         void visit(int index, double value);
     }
 
+    /** Receives runs of consecutive elements: values[0 until count] start at flat row-major index [start]. */
+    public interface RowVisitor {
+        void row(int start, double[] values, int count);
+    }
+
+    /**
+     * Like {@link #forEachElement} but decodes whole runs at once with a typed
+     * buffer, which is several times faster for large float/int datasets.
+     */
+    public void forEachRow(RowVisitor v) {
+        if (!isDataset()) throw new Hdf5Exception(name + " is not a dataset");
+        if (layoutClass != 2) {
+            byte[] raw = readRaw();
+            int n = raw.length / type.size;
+            double[] buf = new double[Math.min(n, 65536)];
+            for (int i = 0; i < n; i += buf.length) {
+                int m = Math.min(buf.length, n - i);
+                decodeRun(raw, i, m, buf);
+                v.row(i, buf, m);
+            }
+            return;
+        }
+        int chunkBytes = chunkBytes();
+        if (f.isUndefined(layoutAddress)) return;
+        double[] buf = new double[(int) chunkDims[chunkDims.length - 1]];
+        for (long[] c : chunkList(chunkBytes)) {
+            byte[] data = f.bytes(f.abs(c[0]), (int) c[1]);
+            data = applyFilters(data, (int) c[2], chunkBytes);
+            rowsOfChunk(data, c, v, buf);
+        }
+    }
+
+    /** Decodes [n] elements starting at element [first] of [raw] into [out]. */
+    private void decodeRun(byte[] raw, int first, int n, double[] out) {
+        java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(raw).order(type.bigEndian ? java.nio.ByteOrder.BIG_ENDIAN : java.nio.ByteOrder.LITTLE_ENDIAN);
+        int es = type.size;
+        int o = first * es;
+        if (type.kind == Datatype.Kind.FLOAT && es == 8) {
+            for (int k = 0; k < n; k++) out[k] = bb.getDouble(o + k * 8);
+        } else if (type.kind == Datatype.Kind.FLOAT && es == 4) {
+            for (int k = 0; k < n; k++) out[k] = bb.getFloat(o + k * 4);
+        } else if (type.kind == Datatype.Kind.INTEGER && es == 1) {
+            if (type.signed) for (int k = 0; k < n; k++) out[k] = raw[o + k];
+            else for (int k = 0; k < n; k++) out[k] = raw[o + k] & 0xFF;
+        } else if (type.kind == Datatype.Kind.INTEGER && es == 2) {
+            if (type.signed) for (int k = 0; k < n; k++) out[k] = bb.getShort(o + k * 2);
+            else for (int k = 0; k < n; k++) out[k] = bb.getShort(o + k * 2) & 0xFFFF;
+        } else if (type.kind == Datatype.Kind.INTEGER && es == 4) {
+            if (type.signed) for (int k = 0; k < n; k++) out[k] = bb.getInt(o + k * 4);
+            else for (int k = 0; k < n; k++) out[k] = bb.getInt(o + k * 4) & 0xFFFFFFFFL;
+        } else {
+            for (int k = 0; k < n; k++) out[k] = type.getDouble(raw, first + k);
+        }
+    }
+
+    private void rowsOfChunk(byte[] chunk, long[] c, RowVisitor v, double[] buf) {
+        int rank = dims.length;
+        int es = type.size;
+        if (rank == 0) {
+            if (chunk.length >= es) { decodeRun(chunk, 0, 1, buf); v.row(0, buf, 1); }
+            return;
+        }
+        int[] cd = new int[rank];
+        int[] dd = new int[rank];
+        int[] off = new int[rank];
+        for (int d = 0; d < rank; d++) {
+            cd[d] = (int) chunkDims[d];
+            dd[d] = (int) dims[d];
+            off[d] = (int) c[3 + d];
+        }
+        int last = rank - 1;
+        int rowLen = Math.min(cd[last], dd[last] - off[last]);
+        if (rowLen <= 0) return;
+        int[] idx = new int[rank];
+        while (true) {
+            boolean inside = true;
+            for (int d = 0; d < last; d++) {
+                if (off[d] + idx[d] >= dd[d]) { inside = false; break; }
+            }
+            if (inside) {
+                long src = 0, dst = 0;
+                for (int d = 0; d < rank; d++) {
+                    src = src * cd[d] + idx[d];
+                    dst = dst * dd[d] + off[d] + idx[d];
+                }
+                if ((src + rowLen) * es <= chunk.length) {
+                    decodeRun(chunk, (int) src, rowLen, buf);
+                    v.row((int) dst, buf, rowLen);
+                }
+            }
+            int d = last - 1;
+            while (d >= 0) {
+                idx[d]++;
+                if (idx[d] < cd[d]) break;
+                idx[d] = 0;
+                d--;
+            }
+            if (d < 0) break;
+        }
+    }
+
     /**
      * Streams every element without materialising the whole dataset: chunked
      * datasets are inflated one chunk at a time, so a 130 MB float64 composite

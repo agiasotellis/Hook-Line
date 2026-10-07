@@ -161,30 +161,29 @@ public final class Odim {
      */
     static long compactThresholdBytes = 24L << 20;
 
-    /** Two streaming passes (range, then codes): the raw dataset is never held in memory. */
+    /**
+     * One streaming pass straight into half-precision floats of the physical
+     * value (2 bytes each, ~0.05 % relative precision, far finer than radar data).
+     * The raw dataset is never held in memory.
+     */
     private static Field compactField(String quantity, Hdf5Object data, int rows, int cols,
                                       double gain, double offset, double nodata, double undetect) {
-        final double[] range = {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
-        data.forEachElement((i, r) -> {
-            if (r == undetect || r == nodata || Double.isNaN(r)) return;
-            if (r < range[0]) range[0] = r;
-            if (r > range[1]) range[1] = r;
+        final short[] half = new short[rows * cols];
+        java.util.Arrays.fill(half, Field.HALF_NAN); // chunks never written read as "no data"
+        final int total = half.length;
+        data.forEachRow((start, values, count) -> {
+            int n = Math.min(count, total - start);
+            for (int k = 0; k < n; k++) {
+                double r = values[k];
+                short h;
+                if (r == undetect) h = Field.HALF_NEG_INF;
+                else if (r == nodata || Double.isNaN(r)) h = Field.HALF_NAN;
+                else h = Field.toHalf((float) (r * gain + offset));
+                half[start + k] = h;
+            }
         });
-        final double min = Double.isInfinite(range[0]) ? 0.0 : range[0];
-        double span = Double.isInfinite(range[1]) ? 0.0 : range[1] - min;
-        final double step = span > 0 ? span / (Field.MAX_CODE - Field.FIRST_VALUE) : 1.0;
-        final short[] codes = new short[rows * cols]; // 0 = no data until written
-        data.forEachElement((i, r) -> {
-            if (i < 0 || i >= codes.length) return;
-            int code;
-            if (r == undetect) code = Field.CODE_UNDETECT;
-            else if (r == nodata || Double.isNaN(r)) code = Field.CODE_NODATA;
-            else code = Field.FIRST_VALUE + (int) Math.round((r - min) / step);
-            codes[i] = (short) Math.min(Field.MAX_CODE, Math.max(0, code));
-        });
-        return new Field(quantity, rows, cols, gain, offset, nodata, undetect, codes, min, step);
+        return new Field(quantity, rows, cols, gain, offset, nodata, undetect, half);
     }
-
     // ---- attribute helpers ----------------------------------------------------------
 
     /** Look up group/attr on d, then ds, then root. */
@@ -357,10 +356,9 @@ public final class Odim {
         public final double gain, offset, nodata, undetect;
         private final byte[] raw;
         private final Datatype type;
-        // Compact form for large fields: 16-bit codes, raw = codeMin + (code - FIRST_VALUE) * codeStep.
-        private final short[] codes;
-        private final double codeMin, codeStep;
-        static final int CODE_NODATA = 0, CODE_UNDETECT = 1, FIRST_VALUE = 2, MAX_CODE = 65535;
+        // Compact form for large fields: physical values as IEEE half floats (UNDETECT = -inf, NODATA = NaN).
+        private final short[] half;
+        static final short HALF_NAN = (short) 0x7E00, HALF_NEG_INF = (short) 0xFC00;
 
         Field(String quantity, int rows, int cols, double gain, double offset, double nodata, double undetect, byte[] raw, Datatype type) {
             this.quantity = quantity;
@@ -372,13 +370,10 @@ public final class Odim {
             this.undetect = undetect;
             this.raw = raw;
             this.type = type;
-            this.codes = null;
-            this.codeMin = 0;
-            this.codeStep = 1;
+            this.half = null;
         }
 
-        Field(String quantity, int rows, int cols, double gain, double offset, double nodata, double undetect,
-              short[] codes, double codeMin, double codeStep) {
+        Field(String quantity, int rows, int cols, double gain, double offset, double nodata, double undetect, short[] half) {
             this.quantity = quantity;
             this.rows = rows;
             this.cols = cols;
@@ -388,19 +383,17 @@ public final class Odim {
             this.undetect = undetect;
             this.raw = null;
             this.type = null;
-            this.codes = codes;
-            this.codeMin = codeMin;
-            this.codeStep = codeStep;
+            this.half = half;
         }
 
         /** Physical value, {@link #UNDETECT} (no echo) or {@link #NODATA} (not scanned). */
         public float value(int row, int col) {
             if (row < 0 || col < 0 || row >= rows || col >= cols) return NODATA;
-            if (codes != null) {
-                int code = codes[row * cols + col] & 0xFFFF;
-                if (code == CODE_NODATA) return NODATA;
-                if (code == CODE_UNDETECT) return UNDETECT;
-                return (float) ((codeMin + (code - FIRST_VALUE) * codeStep) * gain + offset);
+            if (half != null) {
+                float v = fromHalf(half[row * cols + col]);
+                if (Float.isNaN(v)) return NODATA;
+                if (v == Float.NEGATIVE_INFINITY) return UNDETECT;
+                return v;
             }
             double r = type.getDouble(raw, row * cols + col);
             if (r == undetect) return UNDETECT;
@@ -416,7 +409,45 @@ public final class Odim {
         }
 
         public int sizeBytes() {
-            return codes != null ? codes.length * 2 : raw.length;
+            return half != null ? half.length * 2 : raw.length;
+        }
+
+        /** float -> IEEE 754 half (round to nearest even). */
+        static short toHalf(float f) {
+            int bits = Float.floatToIntBits(f);
+            int sign = (bits >>> 16) & 0x8000;
+            int exp = (bits >>> 23) & 0xFF;
+            int mant = bits & 0x7FFFFF;
+            if (exp == 0xFF) return (short) (sign | 0x7C00 | (mant != 0 ? 0x200 : 0));
+            int e = exp - 127 + 15;
+            if (e >= 0x1F) return (short) (sign | 0x7C00);                    // overflow -> inf
+            if (e <= 0) {                                                      // subnormal / zero
+                if (e < -10) return (short) sign;
+                mant |= 0x800000;
+                int shift = 14 - e;
+                int h = mant >> shift;
+                if (((mant >> (shift - 1)) & 1) != 0 && ((mant & ((1 << (shift - 1)) - 1)) != 0 || (h & 1) != 0)) h++;
+                return (short) (sign | h);
+            }
+            int h = sign | (e << 10) | (mant >> 13);
+            int rest = mant & 0x1FFF;
+            if (rest > 0x1000 || (rest == 0x1000 && (h & 1) != 0)) h++;        // may carry into exponent: still correct
+            return (short) h;
+        }
+
+        /** IEEE 754 half -> float. */
+        static float fromHalf(short hs) {
+            int h = hs & 0xFFFF;
+            int sign = (h & 0x8000) << 16;
+            int exp = (h >>> 10) & 0x1F;
+            int mant = h & 0x3FF;
+            if (exp == 0) {
+                if (mant == 0) return Float.intBitsToFloat(sign);
+                float v = mant / 1024f * (1f / 16384f);                          // subnormal: mant * 2^-24
+                return sign != 0 ? -v : v;
+            }
+            if (exp == 0x1F) return Float.intBitsToFloat(sign | 0x7F800000 | (mant << 13));
+            return Float.intBitsToFloat(sign | ((exp - 15 + 127) << 23) | (mant << 13));
         }
     }
 }
