@@ -26,7 +26,7 @@ class WarningsTest {
 
     @Test fun countriesInBox() {
         val c = regions.countriesIn(46.0, 5.0, 48.0, 11.0)
-        assertTrue("CH" in c)
+        assertTrue("DE" in c && "FR" in c)
         assertTrue(c.all { it in WarningRegions.FEEDS || it.length == 2 })
     }
 
