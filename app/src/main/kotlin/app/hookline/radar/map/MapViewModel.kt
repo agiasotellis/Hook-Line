@@ -1105,7 +1105,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val wanted = keys.map { it.timeMillis }.toSet()
         layers.keys.retainAll(wanted) // frames that aged out of the loop window
         compositeLoopLayers = layers
-        val missing = keys.filter { it.timeMillis !in layers }
+        val missing = keys.filter { !layers.containsKey(it.timeMillis) }
         if (missing.isEmpty()) return null
         val gate = kotlinx.coroutines.sync.Semaphore(3)        // downloads in flight
         val decodeGate = kotlinx.coroutines.sync.Semaphore(2)  // full-size decodes in memory at once
