@@ -1027,6 +1027,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (e: Exception) {
                     attempt++
                     _state.update { it.copy(status = FeedStatus.Stale(e.message ?: tr("Can't reach European radar data"))) }
+                } catch (e: OutOfMemoryError) {
+                    attempt++
+                    compositeBytes.clear()
+                    _state.update { it.copy(status = FeedStatus.Stale(tr("Not enough memory for the European composite"))) }
                 }
                 delay(if (attempt == 0) 120_000L else (15_000L * attempt).coerceAtMost(120_000L))
             }
@@ -1087,9 +1091,15 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         for ((i, k) in keys.withIndex()) {
             setLoopLoading(tr("Loading loop %s/%s", i + 1, keys.size))
             val bytes = compositeBytes[k.timeMillis] ?: opera.fetchBytes(k).also { compositeBytes[k.timeMillis] = it }
-            val layer = withContext(Dispatchers.Default) {
-                val g = OperaComposite.decode(bytes)
-                CompositeTile.build(g, loc, box[0], box[1], box[2], box[3], 1024, origin.siteLat, origin.siteLon, true)?.let { compositeLayer(it) }
+            val layer = try {
+                withContext(Dispatchers.Default) {
+                    val g = OperaComposite.decode(bytes)
+                    CompositeTile.build(g, loc, box[0], box[1], box[2], box[3], 1024, origin.siteLat, origin.siteLon, true)?.let { compositeLayer(it) }
+                }
+            } catch (e: OutOfMemoryError) {
+                // Low-memory phone: loop the frames we already have rather than crash.
+                compositeBytes.clear()
+                break
             } ?: continue
             layers[k.timeMillis] = layer
         }

@@ -146,8 +146,43 @@ public final class Odim {
         double offset = numOr(inherit(root, ds, d, "what", "offset"), 0.0);
         double nodata = numOr(inherit(root, ds, d, "what", "nodata"), Double.NaN);
         double undetect = numOr(inherit(root, ds, d, "what", "undetect"), Double.NaN);
-        byte[] raw = data.readRaw();
-        return new Field(quantity.trim(), (int) dims[0], (int) dims[1], gain, offset, nodata, undetect, raw, data.datatype());
+        long bytes = dims[0] * dims[1] * data.datatype().size;
+        if (bytes <= compactThresholdBytes) {
+            byte[] raw = data.readRaw();
+            return new Field(quantity.trim(), (int) dims[0], (int) dims[1], gain, offset, nodata, undetect, raw, data.datatype());
+        }
+        return compactField(quantity.trim(), data, (int) dims[0], (int) dims[1], gain, offset, nodata, undetect);
+    }
+
+    /**
+     * Fields bigger than this are stored as 16-bit codes instead of raw bytes. The
+     * OPERA composite is a 3800 x 4400 float64 grid: 134 MB raw, 33 MB compact.
+     * Package-visible so tests can force the compact path.
+     */
+    static long compactThresholdBytes = 24L << 20;
+
+    /** Two streaming passes (range, then codes): the raw dataset is never held in memory. */
+    private static Field compactField(String quantity, Hdf5Object data, int rows, int cols,
+                                      double gain, double offset, double nodata, double undetect) {
+        final double[] range = {Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
+        data.forEachElement((i, r) -> {
+            if (r == undetect || r == nodata || Double.isNaN(r)) return;
+            if (r < range[0]) range[0] = r;
+            if (r > range[1]) range[1] = r;
+        });
+        final double min = Double.isInfinite(range[0]) ? 0.0 : range[0];
+        double span = Double.isInfinite(range[1]) ? 0.0 : range[1] - min;
+        final double step = span > 0 ? span / (Field.MAX_CODE - Field.FIRST_VALUE) : 1.0;
+        final short[] codes = new short[rows * cols]; // 0 = no data until written
+        data.forEachElement((i, r) -> {
+            if (i < 0 || i >= codes.length) return;
+            int code;
+            if (r == undetect) code = Field.CODE_UNDETECT;
+            else if (r == nodata || Double.isNaN(r)) code = Field.CODE_NODATA;
+            else code = Field.FIRST_VALUE + (int) Math.round((r - min) / step);
+            codes[i] = (short) Math.min(Field.MAX_CODE, Math.max(0, code));
+        });
+        return new Field(quantity, rows, cols, gain, offset, nodata, undetect, codes, min, step);
     }
 
     // ---- attribute helpers ----------------------------------------------------------
@@ -322,6 +357,10 @@ public final class Odim {
         public final double gain, offset, nodata, undetect;
         private final byte[] raw;
         private final Datatype type;
+        // Compact form for large fields: 16-bit codes, raw = codeMin + (code - FIRST_VALUE) * codeStep.
+        private final short[] codes;
+        private final double codeMin, codeStep;
+        static final int CODE_NODATA = 0, CODE_UNDETECT = 1, FIRST_VALUE = 2, MAX_CODE = 65535;
 
         Field(String quantity, int rows, int cols, double gain, double offset, double nodata, double undetect, byte[] raw, Datatype type) {
             this.quantity = quantity;
@@ -333,11 +372,36 @@ public final class Odim {
             this.undetect = undetect;
             this.raw = raw;
             this.type = type;
+            this.codes = null;
+            this.codeMin = 0;
+            this.codeStep = 1;
+        }
+
+        Field(String quantity, int rows, int cols, double gain, double offset, double nodata, double undetect,
+              short[] codes, double codeMin, double codeStep) {
+            this.quantity = quantity;
+            this.rows = rows;
+            this.cols = cols;
+            this.gain = gain;
+            this.offset = offset;
+            this.nodata = nodata;
+            this.undetect = undetect;
+            this.raw = null;
+            this.type = null;
+            this.codes = codes;
+            this.codeMin = codeMin;
+            this.codeStep = codeStep;
         }
 
         /** Physical value, {@link #UNDETECT} (no echo) or {@link #NODATA} (not scanned). */
         public float value(int row, int col) {
             if (row < 0 || col < 0 || row >= rows || col >= cols) return NODATA;
+            if (codes != null) {
+                int code = codes[row * cols + col] & 0xFFFF;
+                if (code == CODE_NODATA) return NODATA;
+                if (code == CODE_UNDETECT) return UNDETECT;
+                return (float) ((codeMin + (code - FIRST_VALUE) * codeStep) * gain + offset);
+            }
             double r = type.getDouble(raw, row * cols + col);
             if (r == undetect) return UNDETECT;
             if (r == nodata || Double.isNaN(r)) return NODATA;
@@ -352,7 +416,7 @@ public final class Odim {
         }
 
         public int sizeBytes() {
-            return raw.length;
+            return codes != null ? codes.length * 2 : raw.length;
         }
     }
 }

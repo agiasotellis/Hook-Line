@@ -354,4 +354,5 @@ private fun elPart2(): Map<String, String> = mapOf(
     "Not now" to "Όχι τώρα",
     "Hookline is an independent app. It is not affiliated with, endorsed by or acting on behalf of any government or weather service. Official sources: weather.gov (US), meteoalarm.org (Europe) and your national weather service." to "Το Hookline είναι ανεξάρτητη εφαρμογή. Δεν συνδέεται με καμία κυβέρνηση ή μετεωρολογική υπηρεσία, ούτε εγκρίνεται από αυτές ή ενεργεί για λογαριασμό τους. Επίσημες πηγές: weather.gov (ΗΠΑ), meteoalarm.org (Ευρώπη) και η εθνική μετεωρολογική υπηρεσία σας.",
     "Privacy policy" to "Πολιτική απορρήτου",
+    "Not enough memory for the European composite" to "Δεν υπάρχει αρκετή μνήμη για τη σύνθεση της Ευρώπης",
 )

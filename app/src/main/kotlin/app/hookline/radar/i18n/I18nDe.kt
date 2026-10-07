@@ -354,4 +354,5 @@ private fun dePart2(): Map<String, String> = mapOf(
     "Not now" to "Nicht jetzt",
     "Hookline is an independent app. It is not affiliated with, endorsed by or acting on behalf of any government or weather service. Official sources: weather.gov (US), meteoalarm.org (Europe) and your national weather service." to "Hookline ist eine unabhängige App. Sie ist weder mit einer Regierung oder einem Wetterdienst verbunden noch von ihnen empfohlen oder in deren Auftrag tätig. Offizielle Quellen: weather.gov (USA), meteoalarm.org (Europa) und dein nationaler Wetterdienst.",
     "Privacy policy" to "Datenschutzerklärung",
+    "Not enough memory for the European composite" to "Nicht genug Speicher für das Europa-Komposit",
 )

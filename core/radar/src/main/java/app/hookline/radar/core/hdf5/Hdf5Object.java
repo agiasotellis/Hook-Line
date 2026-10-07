@@ -400,17 +400,60 @@ public final class Hdf5Object {
 
     // ---- chunked data --------------------------------------------------------
 
+    /** Receives each element of a dataset: flat row-major index and value. */
+    public interface ElementVisitor {
+        void visit(int index, double value);
+    }
+
+    /**
+     * Streams every element without materialising the whole dataset: chunked
+     * datasets are inflated one chunk at a time, so a 130 MB float64 composite
+     * never needs 130 MB of memory. Elements of chunks that were never written
+     * are not visited.
+     */
+    public void forEachElement(ElementVisitor v) {
+        if (!isDataset()) throw new Hdf5Exception(name + " is not a dataset");
+        if (layoutClass != 2) {
+            byte[] raw = readRaw();
+            int n = raw.length / type.size;
+            for (int i = 0; i < n; i++) v.visit(i, type.getDouble(raw, i));
+            return;
+        }
+        int chunkBytes = chunkBytes();
+        if (f.isUndefined(layoutAddress)) return;
+        for (long[] c : chunkList(chunkBytes)) {
+            byte[] data = f.bytes(f.abs(c[0]), (int) c[1]);
+            data = applyFilters(data, (int) c[2], chunkBytes);
+            visitChunk(data, c, v);
+        }
+    }
+
+    private int chunkBytes() {
+        long chunkElements = 1;
+        for (long c : chunkDims) chunkElements *= c;
+        return (int) (chunkElements * type.size);
+    }
+
     private byte[] readChunked(int totalBytes) {
         int rank = dims.length;
         if (chunkDims.length != rank) throw new Hdf5Exception("Chunk rank mismatch in " + name);
         byte[] out = new byte[totalBytes];
         int elementSize = type.size;
-        long chunkElements = 1;
-        for (long c : chunkDims) chunkElements *= c;
-        int chunkBytes = (int) (chunkElements * elementSize);
-
-        List<long[]> chunks = new ArrayList<>(); // {address, size, filterMask, offsets...}
+        int chunkBytes = chunkBytes();
         if (f.isUndefined(layoutAddress)) return out;
+        for (long[] c : chunkList(chunkBytes)) {
+            byte[] data = f.bytes(f.abs(c[0]), (int) c[1]);
+            data = applyFilters(data, (int) c[2], chunkBytes);
+            copyChunk(data, c, out, elementSize);
+        }
+        return out;
+    }
+
+    /** Every stored chunk as {address, size, filterMask, offsets...}. */
+    private List<long[]> chunkList(int chunkBytes) {
+        int rank = dims.length;
+        if (chunkDims.length != rank) throw new Hdf5Exception("Chunk rank mismatch in " + name);
+        List<long[]> chunks = new ArrayList<>();
         switch (chunkIndexType) {
             case 0:
                 collectBtreeChunks(f.abs(layoutAddress), rank, chunks, 0);
@@ -448,12 +491,7 @@ public final class Hdf5Object {
                 throw new Hdf5Exception("Unsupported chunk index type " + chunkIndexType + " in " + name);
         }
 
-        for (long[] c : chunks) {
-            byte[] data = f.bytes(f.abs(c[0]), (int) c[1]);
-            data = applyFilters(data, (int) c[2], chunkBytes);
-            copyChunk(data, c, out, elementSize);
-        }
-        return out;
+        return chunks;
     }
 
     private long[] chunkGrid(int rank) {
@@ -557,6 +595,51 @@ public final class Hdf5Object {
     }
 
     /** Copy one decoded chunk into the full array, clipping at the dataset edges. */
+    private void visitChunk(byte[] chunk, long[] c, ElementVisitor v) {
+        int rank = dims.length;
+        int es = type.size;
+        if (rank == 0) {
+            if (chunk.length >= es) v.visit(0, type.getDouble(chunk, 0));
+            return;
+        }
+        int[] cd = new int[rank];
+        int[] dd = new int[rank];
+        int[] off = new int[rank];
+        for (int d = 0; d < rank; d++) {
+            cd[d] = (int) chunkDims[d];
+            dd[d] = (int) dims[d];
+            off[d] = (int) c[3 + d];
+        }
+        int last = rank - 1;
+        int rowLen = Math.min(cd[last], dd[last] - off[last]);
+        if (rowLen <= 0) return;
+        int[] idx = new int[rank];
+        while (true) {
+            boolean inside = true;
+            for (int d = 0; d < last; d++) {
+                if (off[d] + idx[d] >= dd[d]) { inside = false; break; }
+            }
+            if (inside) {
+                long src = 0, dst = 0;
+                for (int d = 0; d < rank; d++) {
+                    src = src * cd[d] + idx[d];
+                    dst = dst * dd[d] + off[d] + idx[d];
+                }
+                if ((src + rowLen) * es <= chunk.length) {
+                    for (int k = 0; k < rowLen; k++) v.visit((int) (dst + k), type.getDouble(chunk, (int) (src + k)));
+                }
+            }
+            int d = last - 1;
+            while (d >= 0) {
+                idx[d]++;
+                if (idx[d] < cd[d]) break;
+                idx[d] = 0;
+                d--;
+            }
+            if (d < 0) break;
+        }
+    }
+
     private void copyChunk(byte[] chunk, long[] c, byte[] out, int es) {
         int rank = dims.length;
         if (rank == 0) {
