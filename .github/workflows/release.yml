@@ -42,7 +42,30 @@ jobs:
           HOOKLINE_KEYSTORE_PASSWORD: ${{ secrets.HOOKLINE_KEYSTORE_PASSWORD }}
           HOOKLINE_KEY_ALIAS: ${{ secrets.HOOKLINE_KEY_ALIAS }}
           HOOKLINE_KEY_PASSWORD: ${{ secrets.HOOKLINE_KEY_PASSWORD }}
-        run: ./gradlew :core:radar:test :core:data:test :app:assembleDebug :app:bundleRelease --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew :core:radar:test :core:data:test :app:assembleDebug :app:bundleRelease --stacktrace 2>&1 | tee build.log
+
+      - name: Report failure on the commit
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '### Release build failed'
+            echo '```'
+            grep -E '^e: |error:|ERROR|FAILED|What went wrong|Missing class|R8|Lint found|lintVital' build.log | head -120
+            echo '```'
+            if [ -f app/build/outputs/mapping/release/missing_rules.txt ]; then echo '**missing_rules.txt**'; echo '```'; cat app/build/outputs/mapping/release/missing_rules.txt; echo '```'; fi
+            for f in app/build/intermediates/lint_vital_intermediate_text_output/release/*/lint-results-release.txt app/build/reports/lint-results-release.txt; do [ -f "$f" ] && { echo "**$f**"; echo '```'; head -80 "$f"; echo '```'; }; done
+            echo '<details><summary>Last 60 lines</summary>'
+            echo
+            echo '```'
+            tail -60 build.log
+            echo '```'
+            echo '</details>'
+          } > report.md
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@report.md
 
       - name: Name the APK
         id: name
