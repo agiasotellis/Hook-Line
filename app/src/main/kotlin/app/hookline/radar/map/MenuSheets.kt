@@ -64,7 +64,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 /** The sheets reachable from the main menu. */
-enum class Sheet { MENU, RADARS, LAYERS, WARNINGS, STORM, PLACES, GUIDE, ABOUT }
+enum class Sheet { MENU, RADARS, LAYERS, WARNINGS, STORM, PLACES, CELLS, ARCHIVE, GUIDE, ABOUT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,6 +113,8 @@ fun MenuSheet(s: MapUiState, onPick: (Sheet) -> Unit, onDismiss: () -> Unit) {
             s.places.firstOrNull { it.outlook != null }?.let { "${it.name}: ${it.outlook}" }
                 ?: if (s.places.isEmpty()) "Save places for warnings and rain alerts" else "${s.places.size} watched",
         ) { onPick(Sheet.PLACES) }
+        MenuRow("Storms", if (s.cells.isEmpty()) "No strong storms in view" else "${s.cells.size} tracked, strongest ${s.cells.first().maxDbz.toInt()} dBZ") { onPick(Sheet.CELLS) }
+        MenuRow("Archive (US)", "Any US radar scan since 2008") { onPick(Sheet.ARCHIVE) }
         MenuRow("Layers, loops and offline maps", if (s.satellite) "Satellite where there's no radar" else "Satellite off") { onPick(Sheet.LAYERS) }
         MenuRow("Guide", "What the colours mean, gestures") { onPick(Sheet.GUIDE) }
         MenuRow("About and data sources", "Version ${BuildConfig.VERSION_NAME}") { onPick(Sheet.ABOUT) }
@@ -415,6 +417,11 @@ fun GuideSheet(onDismiss: () -> Unit) {
         Section("Your location and measuring", "The target button shows where you are and follows you as you move. The ruler measures distance and bearing between two taps, and how long a storm at the current speed takes to cover it.")
         Section("Rain starting soon", "For each place, Hookline looks at the latest radar and how the rain is moving, and tells you when rain should arrive in the next hour. It can't foresee storms that haven't formed yet.")
         Section("Lightning", "Crosses are lightning flashes in the last 15 minutes, white for the newest. Americas: NOAA GOES satellites. Europe and Africa: Meteosat's lightning imager, shown as shaded areas.")
+        Section("Storms", "Strong cells (40 dBZ and up) get a ring coloured by strength and a line to where they'll be in 15 and 30 minutes. The Storms list says which are heading your way.")
+        Section("Side by side", "The split-screen button shows velocity under reflectivity (or the other way round), moving together, the usual way to spot rotation.")
+        Section("Cross-section", "Measure a line across a storm, then tap Cross-section to see a slice from the ground up: tall, strong cores and overhangs show where hail grows.")
+        Section("Hail and rotation (US)", "From NOAA's MRMS: where radar estimated hail in the last 24 hours, or where rotation was detected in the last hour. Long-press for the value.")
+        Section("Archive (US)", "Open any NEXRAD scan since 2008 from NOAA's archive and step through the day.")
         Section("Sharing", "The share button sends a picture of the map, or the loop as an animated GIF, with the data credits included.")
         Section("Warnings", "Coloured outlines on the map: NWS warnings in the US; yellow, orange and red MeteoAlarm warnings in Europe. Open the menu for the full text.")
     }
@@ -436,6 +443,7 @@ fun AboutSheet(onDismiss: () -> Unit) {
         Section("European warnings", "MeteoAlarm, EUMETNET and the national weather services. Licence CC BY 4.0. Region outlines from MeteoAlarm geocodes, simplified.")
         Section("Satellite", "Imagery from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS): NOAA GOES-East and GOES-West, JMA Himawari. Contains modified EUMETSAT Meteosat data (CC BY 4.0), hourly.")
         Section("Lightning", "Americas: NOAA GOES-East/West Geostationary Lightning Mapper via NOAA Open Data Dissemination. Europe and Africa: contains modified EUMETSAT Meteosat data (MTG Lightning Imager, CC BY 4.0).")
+        Section("Hail, rotation and archive (US)", "NOAA MRMS swaths and the NEXRAD Level II archive, via the NOAA Open Data Dissemination program on AWS.")
         Section("Rain alerts", "EUMETNET OPERA rain-rate composite (CC BY 4.0) in Europe; NOAA MRMS in the US.")
         Section("Base map", "OpenFreeMap, OpenMapTiles, © OpenStreetMap contributors.")
         Text(

@@ -35,7 +35,7 @@ data class MapIntensity(val roads: Float = 0.7f, val labels: Float = 0.8f, val b
  * (OpenMapTiles schema) rather than by layer id, so upstream style changes
  * don't break us, and the chrome stays neutral: the radar is the only colour.
  */
-class BaseMap(context: Context) {
+class BaseMap(context: Context, interactive: Boolean = true) {
 
     val mapView: MapView
     var map: MapLibreMap? = null
@@ -76,6 +76,9 @@ class BaseMap(context: Context) {
             .logoEnabled(false)
             .compassEnabled(false)
             .rotateGesturesEnabled(false) // north-up keeps radar geometry honest
+            .scrollGesturesEnabled(interactive)
+            .zoomGesturesEnabled(interactive)
+            .doubleTapGesturesEnabled(interactive)
             .tiltGesturesEnabled(false)
             .minZoomPreference(2.0)
             .maxZoomPreference(14.0)
@@ -106,6 +109,8 @@ class BaseMap(context: Context) {
         if (m == null) pendingCamera = LatLng(lat, lon) to zoom
         else m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lon), zoom))
     }
+
+    fun cameraTarget(): Pair<LatLng, Double>? = map?.cameraPosition?.let { cp -> cp.target?.let { it to cp.zoom } }
 
     fun visibleBounds(): LatLngBounds? = map?.projection?.visibleRegion?.latLngBounds
 

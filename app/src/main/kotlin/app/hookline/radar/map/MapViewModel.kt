@@ -13,6 +13,12 @@ import app.hookline.radar.core.data.Fmt
 import app.hookline.radar.core.data.Flash
 import app.hookline.radar.core.data.GlmLightning
 import app.hookline.radar.stormmode.Place
+import app.hookline.radar.core.data.LocalGrid
+import app.hookline.radar.core.data.MrmsTracks
+import app.hookline.radar.core.data.StormCell
+import app.hookline.radar.core.data.StormCells
+import app.hookline.radar.core.data.VolumeAssembler
+import java.time.LocalDate
 import app.hookline.radar.core.data.UnitSystem
 import app.hookline.radar.core.data.Imagery
 import app.hookline.radar.core.data.ImagerySource
@@ -157,6 +163,19 @@ data class MapUiState(
     val lightning: Boolean = false,
     /** Lightning status line, e.g. "124 flashes in the last 15 min". */
     val lightningInfo: String? = null,
+    /** Second radar pane (velocity next to reflectivity). */
+    val dualPane: Boolean = false,
+    val siteLayer2: RasterLayer? = null,
+    val cells: List<StormCell> = emptyList(),
+    val showCells: Boolean = true,
+    val trackOverlay: MrmsTracks.Product? = null,
+    val overlayLayer: RasterLayer? = null,
+    val overlayInfo: String? = null,
+    val crossSection: CrossSection? = null,
+    val crossSectionNote: String? = null,
+    val archive: ArchiveUi? = null,
+    /** Device location, once known. */
+    val me: LatLon? = null,
     val intensity: MapIntensity = MapIntensity(),
     val loopLength: Int = 12,
     val camera: CameraTarget? = null,
@@ -164,6 +183,8 @@ data class MapUiState(
 ) {
     val frameAgeSeconds: Int? get() = frameEndMillis?.let { ((nowMillis - it) / 1000).toInt().coerceAtLeast(0) }
     val showingLatest: Boolean get() = loop.index == null
+    /** The product shown in the second pane. */
+    val product2: Product get() = if (product == Product.REF) Product.VEL else Product.REF
 
     companion object {
         val DEFAULT_MOTION = MotionInfo(240, 30, "Default motion")
@@ -171,6 +192,24 @@ data class MapUiState(
 }
 
 data class Inspection(val value: String, val meaning: String, val height: String)
+
+/** A vertical slice through the radar volume along the measure line. Row 0 is the top. */
+class CrossSection(val width: Int, val height: Int, val values: FloatArray, val distanceM: Double, val topM: Double, val tilts: Int)
+
+/** Browsing NOAA's NEXRAD archive for one radar and day (UTC). */
+data class ArchiveUi(
+    val site: RadarSite,
+    val date: LocalDate,
+    val keys: List<String> = emptyList(),
+    /** Loaded scan, or null while choosing. */
+    val index: Int? = null,
+    val loading: String? = null,
+    val error: String? = null,
+) {
+    fun label(i: Int): String = keys.getOrNull(i)?.substringAfterLast('/')?.let { n ->
+        Regex("""(\d{8})_(\d{2})(\d{2})(\d{2})""").find(n)?.let { "${it.groupValues[2]}:${it.groupValues[3]}" }
+    } ?: "?"
+}
 
 /** Measuring between two taps: [a] first, then [b]. */
 data class Measure(val a: LatLon? = null, val b: LatLon? = null)
@@ -190,6 +229,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val meteoAlarm = MeteoAlarm(http)
     private val dwd = DwdDualPol(http)
     private val glm = GlmLightning(http)
+    private val mrmsTracks = MrmsTracks(http)
 
     val offline = OfflineMaps(app)
 
@@ -215,6 +255,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             places = checker.allPlaces(),
             rainWifiOnly = checker.store.rainOnWifiOnly,
             lightning = prefs.getBoolean("lightning", false),
+            showCells = prefs.getBoolean("cells", true),
+            trackOverlay = prefs.getString("track_overlay", null)?.let { runCatching { MrmsTracks.Product.valueOf(it) }.getOrNull() },
         ),
     )
     val state: StateFlow<MapUiState> = _state.asStateFlow()
@@ -249,6 +291,20 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private var regions: WarningRegions? = null
     private var eumetsat: EumetsatLayers? = null
 
+    // storm cells
+    private var cellsTime = 0L
+    private var cellSeq = 0
+
+    // hail / rotation swaths
+    private var overlayJob: Job? = null
+    private var overlaySwath: MrmsTracks.Swath? = null
+
+    // second pane
+    private var frameJob2: Job? = null
+
+    // archive
+    private var archiveJob: Job? = null
+
     // lightning (GOES GLM, Americas)
     private var flashes: List<Flash> = emptyList()
     private val glmKnown = LinkedHashSet<String>()
@@ -273,6 +329,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch { eumetsat = loadEumetsatLayers(); updateImagery() }
         if (_state.value.lightning) startLightning()
+        _state.value.trackOverlay?.let { startTracks(it) }
         // Imagery URLs carry the time: refresh them every 5 minutes.
         viewModelScope.launch { while (isActive) { delay(300_000); updateImagery() } }
     }
@@ -294,6 +351,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     /** Device location, once permission is granted. Recentres only the first time. */
     fun onLocation(lat: Double, lon: Double) {
         val p = LatLon(lat, lon)
+        _state.update { it.copy(me = p) }
         viewModelScope.launch {
             val region = if (Coverage.inUs(p)) null else withContext(Dispatchers.Default) {
                 (regions ?: runCatching { WarningRegions.bundled() }.getOrNull())?.regionAt(p)
@@ -346,6 +404,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun decideSource() {
         val s = _state.value
+        if (s.archive?.index != null) return // browsing the archive: stay on that radar
         val inEurope = Coverage.inOperaComposite(mapCenter)
         if (!s.autoSite && s.site != null) {
             if (s.mode != Mode.SITE) setMode(Mode.SITE)
@@ -397,6 +456,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (mode == Mode.COMPOSITE) startComposite() else stopComposite()
         if (mode == Mode.COMPOSITE) refreshLoopUi()
         if (mode == Mode.MOSAIC || mode == Mode.NONE) _state.update { it.copy(loop = LoopUi(available = false)) }
+        if (mode != Mode.SITE && mode != Mode.COMPOSITE) { cellsTime = 0; _state.update { it.copy(cells = emptyList()) } }
+        if (mode != Mode.SITE) _state.update { it.copy(dualPane = false, siteLayer2 = null) }
         updateImagery()
     }
 
@@ -737,6 +798,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun inspect(at: LatLng) {
+        inspectBase(at)
+        overlayText(at.latitude, at.longitude)?.let { extra ->
+            _state.update { st -> st.copy(inspector = st.inspector?.let { it.copy(meaning = it.meaning + "\n" + extra) } ?: Inspection("Swath", extra, "")) }
+        }
+    }
+
+    private fun inspectBase(at: LatLng) {
         val s = _state.value
         if (s.mode == Mode.SITE) {
             val tex = currentTexture ?: return
@@ -812,6 +880,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 attribution = attributionFor(Mode.SITE, site),
             )
         }
+        cellsTime = 0
+        _state.update { it.copy(cells = emptyList(), siteLayer2 = null, crossSection = null) }
         rebuildOverlays()
         if (DwdDualPol.supports(site.id)) startDualPol(site)
         streamJob = viewModelScope.launch {
@@ -842,6 +912,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (first) rebuildOverlays()
         val lt = loopTilt()
         addToLoop(e.snapshot.sweep(lt, Moment.REFLECTIVITY), e.snapshot.sweep(lt, Moment.VELOCITY))
+        e.snapshot.sweep(lt, Moment.REFLECTIVITY)?.let { cellsFromSweep(it) }
         if (first) startBackfill(site, e.volume)
         if (_state.value.showingLatest) showCurrent()
     }
@@ -944,6 +1015,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                         compositeKeys = keys
                         while (compositeBytes.size > 12) compositeBytes.pollFirstEntry()
                         _state.update { it.copy(status = FeedStatus.Live) }
+                        cellsFromComposite(grid)
                         refreshCompositeTile(force = true)
                         refreshLoopUi()
                     }
@@ -1094,38 +1166,52 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (s.mode != Mode.SITE) return
         val loc = siteLocation ?: return
-        val idx = s.loop.index
-        val buffer = loopFor(s.product)
-        if (idx != null && s.loop.available && buffer != null) {
-            val key = s.loop.frames.getOrNull(idx) ?: return
-            val compact = buffer[key] ?: return
-            render(s.product, s.origin, loc) {
-                if (s.product == Product.SRV) {
-                    val m = s.motion
-                    compact.toTexture { az, v -> v - StormRelative.component(az, m.fromDeg.toFloat(), m.speedKt * 0.514444f) }
-                } else compact.toTexture()
+        if (s.loop.index == null || !s.loop.available) {
+            val snap = snapshot ?: return
+            val available = Product.entries.filter { snap.sweep(s.tilt, it.moment) != null || dualPolSweep(s.tilt, it.moment) != null }.toSet()
+            val product = if (s.product in available || available.isEmpty()) s.product else Product.REF
+            if (product != s.product || available != s.availableProducts) {
+                _state.update { it.copy(product = product, availableProducts = available.ifEmpty { setOf(Product.REF) }) }
             }
-            return
         }
-        val snap = snapshot ?: return
-        val available = Product.entries.filter { snap.sweep(s.tilt, it.moment) != null || dualPolSweep(s.tilt, it.moment) != null }.toSet()
-        val product = if (s.product in available || available.isEmpty()) s.product else Product.REF
-        if (product != s.product || available != s.availableProducts) {
-            _state.update { it.copy(product = product, availableProducts = available.ifEmpty { setOf(Product.REF) }) }
-        }
-        val sweep = snap.sweep(s.tilt, product.moment) ?: dualPolSweep(s.tilt, product.moment) ?: return // tilt still downloading
-        val motion = s.motion
-        render(product, s.origin, loc) {
-            val srv: ((Radial, MomentData) -> MomentData)? = if (product == Product.SRV) {
-                { r, md -> StormRelative.apply(r, motion.fromDeg.toFloat(), motion.speedKt * 0.514444f) ?: md }
-            } else null
-            SweepTexture.from(sweep, product.moment, srv)
+        val st = _state.value
+        textureBuilder(st.product, st)?.let { render(st.product, st.origin, loc, it, second = false) }
+        if (st.dualPane) {
+            textureBuilder(st.product2, st)?.let { render(st.product2, st.origin, loc, it, second = true) }
+        } else if (st.siteLayer2 != null) {
+            _state.update { it.copy(siteLayer2 = null) }
         }
     }
 
-    private fun render(product: Product, origin: MercatorProjector, radar: LatLon, build: () -> SweepTexture?) {
-        frameJob?.cancel()
-        frameJob = viewModelScope.launch {
+    /**
+     * How to build the texture for [p] right now: the loop frame on screen
+     * (REF and velocity frames are matched by time), or the live sweep.
+     */
+    private fun textureBuilder(p: Product, s: MapUiState): (() -> SweepTexture?)? {
+        val idx = s.loop.index
+        val buffer = loopFor(p)
+        val m = s.motion
+        if (idx != null && s.loop.available && buffer != null) {
+            val key = s.loop.frames.getOrNull(idx) ?: return null
+            val compact = (buffer.floorEntry(key) ?: buffer.ceilingEntry(key))?.value ?: return null
+            return {
+                if (p == Product.SRV) compact.toTexture { az, v -> v - StormRelative.component(az, m.fromDeg.toFloat(), m.speedKt * 0.514444f) }
+                else compact.toTexture()
+            }
+        }
+        val snap = snapshot ?: return null
+        val sweep = snap.sweep(s.tilt, p.moment) ?: dualPolSweep(s.tilt, p.moment) ?: return null // tilt still downloading
+        return {
+            val srv: ((Radial, MomentData) -> MomentData)? = if (p == Product.SRV) {
+                { r, md -> StormRelative.apply(r, m.fromDeg.toFloat(), m.speedKt * 0.514444f) ?: md }
+            } else null
+            SweepTexture.from(sweep, p.moment, srv)
+        }
+    }
+
+    private fun render(product: Product, origin: MercatorProjector, radar: LatLon, build: () -> SweepTexture?, second: Boolean = false) {
+        if (second) frameJob2?.cancel() else frameJob?.cancel()
+        val job = viewModelScope.launch {
             val built = withContext(Dispatchers.Default) {
                 val tex = build() ?: return@withContext null
                 tex to RasterLayer(
@@ -1133,9 +1219,347 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     product.palette, product.min, product.max,
                 )
             } ?: return@launch
-            currentTexture = built.first
-            _state.update { it.copy(siteLayer = built.second, frameEndMillis = built.first.endMillis) }
+            if (second) {
+                _state.update { it.copy(siteLayer2 = built.second) }
+            } else {
+                currentTexture = built.first
+                _state.update { it.copy(siteLayer = built.second, frameEndMillis = built.first.endMillis) }
+            }
         }
+        if (second) frameJob2 = job else frameJob = job
+    }
+
+    fun setDualPane(on: Boolean) {
+        _state.update { it.copy(dualPane = on && it.mode == Mode.SITE) }
+        showCurrent()
+    }
+
+    // ---- storm cells ---------------------------------------------------------------------------
+
+    fun setShowCells(on: Boolean) {
+        prefs.edit().putBoolean("cells", on).apply()
+        cellsTime = 0
+        _state.update { it.copy(showCells = on, cells = emptyList()) }
+        rebuildOverlays()
+        if (on) snapshot?.sweep(loopTilt(), Moment.REFLECTIVITY)?.let { cellsFromSweep(it) }
+        if (on) compositeGrid?.let { cellsFromComposite(it) }
+    }
+
+    /** Cells within 200 km of a single radar, 1 km grid, lowest tilt. */
+    private fun cellsFromSweep(sweep: app.hookline.radar.core.radar.Sweep) {
+        val radar = siteLocation ?: return
+        updateCells {
+            val tex = SweepTexture.from(sweep, Moment.REFLECTIVITY, null) ?: return@updateCells null
+            LocalGrid.sample(radar, 1.0, 401, tex.endMillis) { lat, lon ->
+                val (brg, dist) = MercatorProjector.bearingDistance(radar.lat, radar.lon, lat, lon)
+                if (dist > 200_000) Float.NaN
+                else tex.valueAtPolar(brg, dist)?.takeIf { it != Gate.RANGE_FOLDED && it > -50f } ?: 0f
+            }
+        }
+    }
+
+    /** Cells within 300 km of the map centre on the European composite, 2 km grid. */
+    private fun cellsFromComposite(g: Odim.Grid) {
+        val loc = compositeLocator ?: return
+        val center = mapCenter
+        updateCells {
+            LocalGrid.sample(center, 2.0, 301, g.endMillis) { lat, lon ->
+                val v = CompositeTile.valueAt(g, loc, lat, lon)
+                if (v.isNaN()) Float.NaN else if (v.isInfinite()) 0f else v
+            }
+        }
+    }
+
+    private fun updateCells(build: () -> LocalGrid?) {
+        if (!_state.value.showCells) return
+        viewModelScope.launch {
+            val grid = withContext(Dispatchers.Default) { runCatching { build() }.getOrNull() } ?: return@launch
+            if (grid.timeMillis <= cellsTime) return@launch
+            val found = withContext(Dispatchers.Default) { StormCells.detect(grid, 40f, minCells = if (grid.cellKm < 1.5) 8 else 3) }
+            val minutes = if (cellsTime == 0L) 0.0 else (grid.timeMillis - cellsTime) / 60_000.0
+            val tracked = StormCells.track(_state.value.cells, found, minutes) { ++cellSeq }
+            cellsTime = grid.timeMillis
+            _state.update { it.copy(cells = tracked) }
+            rebuildOverlays()
+        }
+    }
+
+    /** A ring per cell, coloured by strength, with its path to +30 minutes. */
+    private fun cellOutlines(o: MercatorProjector): List<Outline> {
+        val out = mutableListOf<Outline>()
+        for (c in _state.value.cells) {
+            val argb = when {
+                c.maxDbz >= 60 -> 0xFFE040FB.toInt()
+                c.maxDbz >= 55 -> 0xFFE5312B.toInt()
+                c.maxDbz >= 50 -> 0xFFF2902B.toInt()
+                else -> 0xFFF2D23B.toInt()
+            }
+            val radius = (kotlin.math.sqrt(c.areaKm2 / Math.PI) + 3).coerceIn(4.0, 25.0) * 1000
+            val ring = FloatArray(48)
+            for (i in 0 until 24) {
+                val (la, lo) = RadialGeometry.destination(c.lat, c.lon, i * 15.0, radius)
+                val (x, y) = o.fromLatLon(la, lo)
+                ring[i * 2] = x.toFloat(); ring[i * 2 + 1] = y.toFloat()
+            }
+            out += Outline(ring, argb, 2.5f)
+            val end = c.ahead(30.0) ?: continue
+            val (x0, y0) = o.fromLatLon(c.lat, c.lon)
+            val mid = c.ahead(15.0)!!
+            val (x1, y1) = o.fromLatLon(mid.lat, mid.lon)
+            val (x2, y2) = o.fromLatLon(end.lat, end.lon)
+            out += Outline(floatArrayOf(x0.toFloat(), y0.toFloat(), x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat()), argb, 2f, closed = false)
+            // Tick marks at 15 and 30 minutes.
+            for (p in listOf(mid, end)) {
+                val mark = FloatArray(8)
+                for ((j, b) in listOf(0.0, 90.0, 180.0, 270.0).withIndex()) {
+                    val (la, lo) = RadialGeometry.destination(p.lat, p.lon, b, 1_200.0 * (1 + mapZoomScale()))
+                    val (mx, my) = o.fromLatLon(la, lo)
+                    mark[j * 2] = mx.toFloat(); mark[j * 2 + 1] = my.toFloat()
+                }
+                out += Outline(mark, argb, 2f)
+            }
+        }
+        return out
+    }
+
+    fun showCell(c: StormCell) = flyTo(c.lat, c.lon, 9.0)
+
+    // ---- hail and rotation swaths (US) ---------------------------------------------------------------
+
+    fun setTrackOverlay(p: MrmsTracks.Product?) {
+        prefs.edit().putString("track_overlay", p?.name).apply()
+        overlayJob?.cancel(); overlayJob = null; overlaySwath = null
+        _state.update { it.copy(trackOverlay = p, overlayLayer = null, overlayInfo = if (p == null) null else "Loading ${p.label.lowercase()}…") }
+        p?.let { startTracks(it) }
+    }
+
+    private fun startTracks(p: MrmsTracks.Product) {
+        overlayJob = viewModelScope.launch {
+            while (isActive) {
+                try {
+                    val sw = mrmsTracks.latest(p)
+                    val origin = _state.value.origin
+                    val layer = withContext(Dispatchers.Default) { swathLayer(sw, origin, p) }
+                    overlaySwath = sw
+                    _state.update { it.copy(overlayLayer = layer, overlayInfo = "${p.label}, until ${clock(sw.timeMillis)}") }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _state.update { it.copy(overlayInfo = "${p.label} not available: ${e.message}") }
+                }
+                delay(p.refreshMs)
+            }
+        }
+    }
+
+    private fun swathLayer(sw: MrmsTracks.Swath, origin: MercatorProjector, p: MrmsTracks.Product): RasterLayer {
+        val values = FloatArray(sw.values.size) { i -> sw.values[i].let { if (it.isNaN()) CompositeTile.BELOW else it } }
+        // Lat/lon grid → Mercator: a 64 × 32 quad mesh keeps the curvature right.
+        val nx = 64; val ny = 32
+        val mesh = FloatArray(nx * ny * 6 * 4)
+        var k = 0
+        fun vertex(u: Double, v: Double) {
+            val lat = sw.north - v * (sw.north - sw.south)
+            val lon = sw.west + u * (sw.east - sw.west)
+            val (x, y) = origin.fromLatLon(lat, lon)
+            mesh[k++] = x.toFloat(); mesh[k++] = y.toFloat(); mesh[k++] = u.toFloat(); mesh[k++] = v.toFloat()
+        }
+        for (j in 0 until ny) for (i in 0 until nx) {
+            val u0 = i.toDouble() / nx; val u1 = (i + 1).toDouble() / nx
+            val v0 = j.toDouble() / ny; val v1 = (j + 1).toDouble() / ny
+            vertex(u0, v0); vertex(u1, v0); vertex(u0, v1)
+            vertex(u1, v0); vertex(u1, v1); vertex(u0, v1)
+        }
+        return when (p) {
+            MrmsTracks.Product.HAIL_24H -> RasterLayer(sw.width, sw.height, values, mesh, HAIL_PALETTE, 0f, 100f)
+            MrmsTracks.Product.ROTATION_60M -> RasterLayer(sw.width, sw.height, values, mesh, ROTATION_PALETTE, 0f, 0.03f)
+        }
+    }
+
+    private fun overlayText(lat: Double, lon: Double): String? {
+        val sw = overlaySwath ?: return null
+        val p = _state.value.trackOverlay ?: return null
+        val v = sw.valueAt(lat, lon)
+        if (v.isNaN()) return null
+        return when (p) {
+            MrmsTracks.Product.HAIL_24H -> {
+                val size = if (_state.value.units == app.hookline.radar.core.data.UnitSystem.IMPERIAL) "%.1f in".format(Locale.US, v / 25.4) else "%.1f cm".format(Locale.US, v / 10)
+                "Radar-estimated hail up to $size here in the last 24 hours."
+            }
+            MrmsTracks.Product.ROTATION_60M -> "Rotation of %.3f /s detected here in the last hour%s.".format(Locale.US, v, if (v >= 0.01) " (strong)" else "")
+        }
+    }
+
+    // ---- cross-section ---------------------------------------------------------------------------------------
+
+    /** Slices the current volume along the measure line (reflectivity, 0–15 km). */
+    fun makeCrossSection() {
+        val s = _state.value
+        val m = s.measure ?: return
+        val a = m.a ?: return; val b = m.b ?: return
+        if (s.mode != Mode.SITE) {
+            _state.update { it.copy(crossSectionNote = "Cross-sections need a single radar: zoom in near one.") }
+            return
+        }
+        val snap = snapshot ?: return
+        val radar = siteLocation ?: return
+        // European radars load tilts on demand: ask for all of them.
+        if (s.site?.network == Network.OPERA) wantedTilts.value = snap.tilts.toSet()
+        _state.update { it.copy(crossSectionNote = "Building cross-section…") }
+        viewModelScope.launch {
+            val cs = withContext(Dispatchers.Default) {
+                val textures = snap.tilts.mapNotNull { t -> snap.sweep(t, Moment.REFLECTIVITY)?.let { SweepTexture.from(it, Moment.REFLECTIVITY, null) } }
+                    .sortedBy { it.elevationDeg }
+                if (textures.isEmpty()) return@withContext null
+                val (brg, dist) = MercatorProjector.bearingDistance(a.lat, a.lon, b.lat, b.lon)
+                val w = 320; val h = 140; val top = 15_000.0
+                val out = FloatArray(w * h) { Float.NaN }
+                for (i in 0 until w) {
+                    val (la, lo) = RadialGeometry.destination(a.lat, a.lon, brg, dist * (i + 0.5) / w)
+                    val (rb, rd) = MercatorProjector.bearingDistance(radar.lat, radar.lon, la, lo)
+                    val centers = textures.map { RadialGeometry.beamHeightMeters(rd, it.elevationDeg.toDouble()) }
+                    val half = rd * Math.tan(Math.toRadians(0.5)) + 150
+                    for (j in 0 until h) {
+                        val z = (h - j - 0.5) / h * top
+                        var best = -1; var bestD = Double.MAX_VALUE
+                        for (t in centers.indices) {
+                            val d = kotlin.math.abs(centers[t] - z)
+                            if (d < bestD) { bestD = d; best = t }
+                        }
+                        // Fill between neighbouring beams, but not above the top beam or below the lowest.
+                        val gap = if (textures.size > 1) {
+                            val upper = centers.getOrNull(best + 1); val lower = centers.getOrNull(best - 1)
+                            maxOf(half, listOfNotNull(upper, lower).maxOfOrNull { kotlin.math.abs(it - centers[best]) / 2 } ?: half)
+                        } else half
+                        if (best < 0 || bestD > gap) continue
+                        val v = textures[best].valueAtPolar(rb, rd)
+                        out[j * w + i] = when {
+                            v == null -> CompositeTile.BELOW
+                            v == Gate.RANGE_FOLDED -> Float.NaN
+                            else -> v
+                        }
+                    }
+                }
+                CrossSection(w, h, out, dist, top, textures.size)
+            }
+            _state.update {
+                it.copy(
+                    crossSection = cs,
+                    crossSectionNote = if (cs == null) "No reflectivity volume yet." else if (cs.tilts < 4) "Only ${cs.tilts} tilts loaded so far; more appear as they download." else null,
+                )
+            }
+        }
+    }
+
+    fun closeCrossSection() = _state.update { it.copy(crossSection = null, crossSectionNote = null) }
+
+    // ---- archive (US NEXRAD) ------------------------------------------------------------------------------------
+
+    /** Opens the archive browser for the current NEXRAD radar (or the nearest one). */
+    fun openArchive() {
+        val s = _state.value
+        val site = s.site?.takeIf { it.network == Network.NEXRAD }
+            ?: Sites.byDistance(mapCenter).firstOrNull { it.network == Network.NEXRAD } ?: return
+        _state.update { it.copy(archive = ArchiveUi(site, LocalDate.now(java.time.ZoneOffset.UTC).minusDays(1))) }
+        archiveSetDate(_state.value.archive!!.date)
+    }
+
+    fun archiveSetSite(site: RadarSite) {
+        val a = _state.value.archive ?: return
+        if (site.network != Network.NEXRAD) return
+        _state.update { it.copy(archive = a.copy(site = site, keys = emptyList(), index = null)) }
+        archiveSetDate(a.date)
+    }
+
+    fun archiveSetDate(date: LocalDate) {
+        val a = _state.value.archive ?: return
+        archiveJob?.cancel()
+        _state.update { it.copy(archive = a.copy(date = date, keys = emptyList(), index = null, loading = "Listing scans…", error = null)) }
+        archiveJob = viewModelScope.launch {
+            try {
+                val keys = nexrad.archiveKeys(a.site.id, date)
+                    .filter { k -> val n = k.substringAfterLast('/'); n.startsWith(a.site.id) && !n.contains("_MDM") }
+                    .sorted()
+                _state.update { it.copy(archive = it.archive?.copy(keys = keys, loading = null, error = if (keys.isEmpty()) "No scans stored for this day." else null)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(archive = it.archive?.copy(loading = null, error = "Couldn't list the archive: ${e.message}")) }
+            }
+        }
+    }
+
+    /** Loads one archived volume (about 5–10 MB) and shows it instead of live data. */
+    fun archiveLoad(index: Int) {
+        val a = _state.value.archive ?: return
+        val key = a.keys.getOrNull(index) ?: return
+        archiveJob?.cancel()
+        stopLoop()
+        streamJob?.cancel(); backfillJob?.cancel(); dualPolJob?.cancel()
+        _state.update { it.copy(archive = a.copy(index = index, loading = "Downloading ${a.label(index)} UTC…", error = null)) }
+        archiveJob = viewModelScope.launch {
+            try {
+                val raw = nexrad.fetchArchive(key)
+                val snap = withContext(Dispatchers.Default) {
+                    val bytes = if (raw.size > 2 && raw[0] == 0x1f.toByte() && raw[1] == 0x8b.toByte()) {
+                        java.util.zip.GZIPInputStream(raw.inputStream()).readBytes()
+                    } else raw
+                    val asm = VolumeAssembler()
+                    asm.accept(1, app.hookline.radar.core.radar.Level2Decoder.decodeRadials(bytes))
+                    asm.snapshot()
+                }
+                if (snap.sweeps.isEmpty()) throw java.io.IOException("This scan uses an older format Hookline can't read (before 2008).")
+                snapshot = snap
+                currentTexture = null
+                refLoop.clear(); velLoop.clear()
+                siteLocation = snap.site?.let { LatLon(it.latitude.toDouble(), it.longitude.toDouble()) } ?: a.site.location
+                cellsTime = 0
+                _state.update {
+                    it.copy(
+                        mode = Mode.SITE, site = a.site, autoSite = false, status = FeedStatus.Live,
+                        tilts = snap.tilts, tilt = snap.tilts.firstOrNull() ?: 0.5f,
+                        loop = LoopUi(available = false), cells = emptyList(),
+                        archive = it.archive?.copy(loading = null),
+                        attribution = attributionFor(Mode.SITE, a.site),
+                    )
+                }
+                setModeSilently()
+                rebuildOverlays()
+                showCurrent()
+                snap.sweep(snap.tilts.firstOrNull() ?: 0.5f, Moment.REFLECTIVITY)?.let { cellsFromSweep(it) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(archive = it.archive?.copy(loading = null, error = e.message ?: "Couldn't load this scan")) }
+            }
+        }
+    }
+
+    /** Leaving the composite/mosaic when an archived scan opens. */
+    private fun setModeSilently() {
+        stopComposite()
+        _state.update { it.copy(compositeLayer = null, imagery = emptyList()) }
+    }
+
+    fun archiveStep(delta: Int) {
+        val a = _state.value.archive ?: return
+        val i = (a.index ?: return) + delta
+        if (i in a.keys.indices) archiveLoad(i)
+    }
+
+    fun exitArchive() {
+        val a = _state.value.archive
+        archiveJob?.cancel()
+        _state.update { it.copy(archive = null) }
+        if (a?.index != null) {
+            prefs.edit().putBoolean("auto_site", true).apply()
+            _state.update { it.copy(autoSite = true) }
+            snapshot = null
+            _state.update { it.copy(site = null, siteLayer = null) }
+            a.site.let { startSite(it) }
+        }
+        decideSource()
+        updateImagery()
     }
 
     // ---- warnings, storm motion, tracks, rings ------------------------------------------------------
@@ -1242,6 +1666,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         list += measureOutlines(o)
         list += placeOutlines(o)
         if (_state.value.lightning) list += lightningOutlines(o)
+        if (_state.value.showCells) list += cellOutlines(o)
         for (a in alerts) {
             if (!_state.value.showWarnings) break
             val (argb, width) = when (a.hazard) {
@@ -1368,6 +1793,33 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         /** Zoom at which the map switches from the composite to the nearest single radar. */
         const val SITE_ZOOM = 6.0
         private const val LIGHTNING_WINDOW = 15 * 60_000L
+
+        /** MESH hail size in mm: pea, quarter, golf ball, tennis ball, baseball and larger. */
+        val HAIL_PALETTE = Palette(
+            "mm",
+            listOf(
+                Palette.Stop(0f, 0, solid = true),
+                Palette.Stop(6f, Palette.argb(200, 120, 200, 255), solid = true),
+                Palette.Stop(19f, Palette.argb(220, 242, 210, 59), solid = true),
+                Palette.Stop(25f, Palette.argb(230, 242, 144, 43), solid = true),
+                Palette.Stop(44f, Palette.argb(240, 229, 49, 43), solid = true),
+                Palette.Stop(64f, Palette.argb(250, 224, 64, 251), solid = true),
+                Palette.Stop(100f, Palette.argb(255, 255, 255, 255), solid = true),
+            ),
+        )
+
+        /** Azimuthal shear in 1/s: weak, moderate, strong, intense. */
+        val ROTATION_PALETTE = Palette(
+            "1/s",
+            listOf(
+                Palette.Stop(0f, 0, solid = true),
+                Palette.Stop(0.004f, Palette.argb(170, 154, 165, 174), solid = true),
+                Palette.Stop(0.007f, Palette.argb(220, 242, 210, 59), solid = true),
+                Palette.Stop(0.01f, Palette.argb(235, 242, 144, 43), solid = true),
+                Palette.Stop(0.015f, Palette.argb(245, 229, 49, 43), solid = true),
+                Palette.Stop(0.02f, Palette.argb(255, 224, 64, 251), solid = true),
+            ),
+        )
         private const val RING_SEGMENTS = 120
         private val TIME = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
         fun clock(millis: Long): String = TIME.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))

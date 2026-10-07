@@ -55,6 +55,7 @@ class RadarRenderer : GLSurfaceView.Renderer {
 
     private val composite = Slot()
     private val site = Slot()
+    private val overlay = Slot()
     @Volatile private var viewport: Viewport = Viewport(1, 1)
     @Volatile private var outlines: List<Outline> = emptyList()
     @Volatile private var clearArgb: Int = 0xFF141B22.toInt()
@@ -67,8 +68,11 @@ class RadarRenderer : GLSurfaceView.Renderer {
     private var lineProgram = 0
     private var lineVbo = 0
 
-    fun setCompositeLayer(layer: RasterLayer?) { composite.pending = layer; composite.dirty = true }
-    fun setSiteLayer(layer: RasterLayer?) { site.pending = layer; site.dirty = true }
+    // Compose calls these on every recomposition: only re-upload when the layer object changed.
+    fun setCompositeLayer(layer: RasterLayer?) { if (layer !== composite.pending) { composite.pending = layer; composite.dirty = true } }
+    fun setSiteLayer(layer: RasterLayer?) { if (layer !== site.pending) { site.pending = layer; site.dirty = true } }
+    /** Drawn on top of the radar: hail swaths or rotation tracks. */
+    fun setOverlayLayer(layer: RasterLayer?) { if (layer !== overlay.pending) { overlay.pending = layer; overlay.dirty = true } }
     fun setViewport(vp: Viewport) { viewport = vp }
     fun setOutlines(list: List<Outline>) { outlines = list }
     /** Map background behind the translucent base map. */
@@ -81,14 +85,15 @@ class RadarRenderer : GLSurfaceView.Renderer {
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         program = GlUtil.program(RASTER_VS, RASTER_FS)
         lineProgram = GlUtil.program(LINE_VS, LINE_FS)
-        val tex = IntArray(4); GLES30.glGenTextures(4, tex, 0)
-        val bufs = IntArray(3); GLES30.glGenBuffers(3, bufs, 0)
+        val tex = IntArray(6); GLES30.glGenTextures(6, tex, 0)
+        val bufs = IntArray(4); GLES30.glGenBuffers(4, bufs, 0)
         composite.valueTex = tex[0]; composite.lutTex = tex[1]; composite.vbo = bufs[0]
         site.valueTex = tex[2]; site.lutTex = tex[3]; site.vbo = bufs[1]
+        overlay.valueTex = tex[4]; overlay.lutTex = tex[5]; overlay.vbo = bufs[3]
         lineVbo = bufs[2]
         lineSource = null
         // New context: re-upload whatever was showing.
-        for (s in listOf(composite, site)) {
+        for (s in listOf(composite, site, overlay)) {
             if (!s.dirty) s.pending = s.current
             s.dirty = true
             s.uploadedPalette = null
@@ -119,7 +124,7 @@ class RadarRenderer : GLSurfaceView.Renderer {
         val cx = vp.centerEastM.toFloat()
         val cy = vp.centerNorthM.toFloat()
 
-        for (s in listOf(composite, site)) {
+        for (s in listOf(composite, site, overlay)) {
             if (s.dirty) {
                 s.dirty = false
                 upload(s, s.pending)

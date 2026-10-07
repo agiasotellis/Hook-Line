@@ -30,6 +30,8 @@ core/data/           NOAA S3 (NEXRAD), EUMETNET Open Radar Data (Europe), NWS al
 tools/sites/         Generator for the site catalogue
 tools/odim-fixtures/ Generator for the synthetic ODIM test files
 tools/meteoalarm/    Packs MeteoAlarm warning-region outlines into the app
+tools/grib2-fixture/ Builds the GRIB2 test file; tools/glm-fixture/ the GLM one
+tools/icon/          Generates the launcher and in-app mark vectors
 core/designsystem/   Hookline theme tokens and components
 tools/mockup-radar/  Generator for the synthetic supercell imagery used in mockups
 ```
@@ -64,7 +66,14 @@ Working now:
 - **Dual-pol in Germany**: CC and ZDR for the 17 DWD radars from DWD open data (OPERA doesn't exchange dual-pol yet).
 - **Menu**: radar search, warnings, Storm Mode, layers, guide to the products, data sources.
 
-Not yet: saved places for Storm Mode, dual-pol for European radars outside Germany, satellite loops.
+- **Places and rain alerts**: watch several places for warnings and "rain in about 20 min" (radar extrapolation: OPERA rain-rate composite in Europe, MRMS in the US).
+- **Widget**: radar around your place, the hour's rain outlook and any warning.
+- **Lightning**: GOES GLM flashes in the Americas; Meteosat Lightning Imager over Europe and Africa.
+- **Storm tracking**: cells of 40 dBZ+ followed scan to scan, with hail risk, speed, direction and arrival time at your location.
+- **Pro views**: reflectivity and velocity side by side, vertical cross-sections, US hail swaths and rotation tracks (MRMS), the NEXRAD archive since 2008.
+- **Everyday tools**: metric/imperial units, your location and follow-me, measure distance and storm travel time, share a picture or the loop as a GIF, night vision.
+
+Not yet: dual-pol for European radars outside Germany, satellite loops, saved-place editing on the map.
 
 Test builds: every push to `main` publishes split APKs on the Releases page (`arm64-v8a` for most phones).
 
@@ -75,6 +84,8 @@ Test builds: every push to `main` publishes split APKs on the Releases page (`ar
 - European warnings: MeteoAlarm / EUMETNET and the national weather services (CC BY 4.0).
 - German dual-pol: Source: Deutscher Wetterdienst (CC BY 4.0).
 - Satellite: NASA GIBS / ESDIS (NOAA GOES, JMA Himawari); contains modified EUMETSAT Meteosat data (CC BY 4.0).
+- Lightning: NOAA GOES GLM (NOAA Open Data Dissemination); contains modified EUMETSAT Meteosat data (MTG Lightning Imager, CC BY 4.0).
+- Hail, rotation, US rain and archive: NOAA MRMS and NEXRAD Level II via the NOAA Open Data Dissemination program.
 - Base map: OpenFreeMap, OpenMapTiles, © OpenStreetMap contributors.
 
 Hookline is not affiliated with or endorsed by any of these organisations, and it is not an official warning service.

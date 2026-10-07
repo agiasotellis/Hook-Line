@@ -94,7 +94,7 @@ fun ShareIcon(color: Color) {
 
 /** The measure tool's readout: distance, bearing and how long a storm would take. */
 @Composable
-fun MeasureCard(s: MapUiState, onClear: () -> Unit, onClose: () -> Unit) {
+fun MeasureCard(s: MapUiState, onClear: () -> Unit, onClose: () -> Unit, onCrossSection: () -> Unit) {
     val c = Hookline.colors
     val m = s.measure ?: return
     Column(
@@ -123,6 +123,9 @@ fun MeasureCard(s: MapUiState, onClear: () -> Unit, onClose: () -> Unit) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            if (m.a != null && m.b != null && s.mode == Mode.SITE) {
+                Text("Cross-section", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onCrossSection).padding(vertical = 8.dp))
+            }
             Text("Clear", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onClear).padding(vertical = 8.dp))
             Text("Done", style = Hookline.type.control, color = c.inkSecondary, modifier = Modifier.clickable(onClick = onClose).padding(vertical = 8.dp))
         }

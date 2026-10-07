@@ -23,9 +23,10 @@ class RadarGlView(context: Context) : GLSurfaceView(context) {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
-    fun setLayers(composite: RasterLayer?, site: RasterLayer?) {
+    fun setLayers(composite: RasterLayer?, site: RasterLayer?, overlay: RasterLayer? = null) {
         renderer.setCompositeLayer(composite)
         renderer.setSiteLayer(site)
+        renderer.setOverlayLayer(overlay)
         requestRender()
     }
     fun setOutlines(list: List<Outline>) { renderer.setOutlines(list); requestRender() }

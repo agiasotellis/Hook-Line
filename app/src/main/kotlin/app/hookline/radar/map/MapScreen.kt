@@ -91,12 +91,15 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     var busy by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val share = remember { ShareActions(context, radar, baseMap, vm) }
+    val follower = remember { arrayOfNulls<BaseMap>(1) }
     var crash by remember { mutableStateOf(app.hookline.radar.CrashLog.read(context)) }
 
     // The map owns gestures; the radar follows its camera exactly.
     LaunchedEffect(baseMap) {
         baseMap.onCameraMove = {
             baseMap.radarViewport(latest.origin, baseMap.mapView.width, baseMap.mapView.height)?.let(radar::setViewport)
+            // Side-by-side: the lower map copies this camera.
+            follower[0]?.let { f -> baseMap.cameraTarget()?.let { (t, z) -> f.moveTo(t.latitude, t.longitude, z) } }
         }
         baseMap.onCameraIdle = vm::onCameraIdle
         baseMap.onLongPress = vm::inspect
@@ -144,16 +147,22 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     }
 
     Box(Modifier.fillMaxSize().background(c.mapVoid)) {
-        AndroidView(
-            factory = { radar },
-            update = { v ->
-                v.setLayers(s.compositeLayer, s.siteLayer)
-                v.setOutlines(s.outlines)
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
-        // Translucent vector map on top: roads, borders and names stay readable over echoes.
-        AndroidView(factory = { baseMap.mapView }, modifier = Modifier.fillMaxSize())
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                AndroidView(
+                    factory = { radar },
+                    update = { v ->
+                        v.setLayers(s.compositeLayer, s.siteLayer, s.overlayLayer)
+                        v.setOutlines(s.outlines)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                // Translucent vector map on top: roads, borders and names stay readable over echoes.
+                AndroidView(factory = { baseMap.mapView }, modifier = Modifier.fillMaxSize())
+                if (s.dualPane) Box(Modifier.align(Alignment.BottomEnd).padding(8.dp)) { PaneLabel(s.product.label) }
+            }
+            if (s.dualPane) SecondPane(s, follower, Modifier.weight(1f).fillMaxWidth())
+        }
 
         Column(
             Modifier.fillMaxWidth().statusBarsPadding().padding(Dimens.EdgeInset),
@@ -177,8 +186,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                         Chip(if (s.warnings.size == 1) "1 warning" else "${s.warnings.size} warnings", swatch = Color(s.warnings.first().argb))
                     }
                 }
+                if (s.cells.isNotEmpty()) {
+                    Box(Modifier.clickable { sheet = Sheet.CELLS }) {
+                        Chip(if (s.cells.size == 1) "1 storm" else "${s.cells.size} storms", swatch = Color(cellColor(s.cells.first())))
+                    }
+                }
                 if (s.stormModeOn) Box(Modifier.clickable { sheet = Sheet.STORM }) { Chip("Storm Mode", dot = true) }
             }
+            ArchiveBar(s, onPrev = { vm.archiveStep(-1) }, onNext = { vm.archiveStep(1) }, onPick = { sheet = Sheet.ARCHIVE }, onExit = vm::exitArchive)
         }
 
         Column(
@@ -195,6 +210,11 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     baseMap.setFollow(following)
                 }
             }) { LocateIcon(it, following) }
+            if (s.mode == Mode.SITE) {
+                MapButton(if (s.dualPane) "Single view" else "Reflectivity and velocity side by side", active = s.dualPane, onClick = {
+                    vm.setDualPane(!s.dualPane)
+                }) { DualIcon(it) }
+            }
             MapButton("Measure distance", active = s.measure != null, onClick = {
                 if (s.measure == null) vm.startMeasure() else vm.closeMeasure()
             }) { RulerIcon(it) }
@@ -237,13 +257,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 )
             }
             busy?.let { Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { Chip(it, dot = true) } }
-            if (s.measure != null) MeasureCard(s, onClear = vm::startMeasure, onClose = vm::closeMeasure)
+            if (s.measure != null) MeasureCard(s, onClear = vm::startMeasure, onClose = vm::closeMeasure, onCrossSection = vm::makeCrossSection)
             s.inspector?.let { InspectorCard(it, onDismiss = vm::dismissInspector) }
             BottomDock(s, onProduct = vm::selectProduct, onPlay = vm::togglePlay, onScrub = vm::scrubTo)
         }
     }
 
     val close = { sheet = null }
+    if (s.crossSection != null || s.crossSectionNote != null) CrossSectionSheet(s, onDismiss = vm::closeCrossSection)
     LoadingScreen(
         visible = !loadingDone,
         status = when {
@@ -254,7 +275,14 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         },
     )
     when (sheet) {
-        Sheet.MENU -> MenuSheet(s, onPick = { sheet = it }, onDismiss = close)
+        Sheet.MENU -> MenuSheet(s, onPick = { if (it == Sheet.ARCHIVE) vm.openArchive(); sheet = it }, onDismiss = close)
+        Sheet.CELLS -> CellsSheet(s, onShow = { vm.showCell(it); sheet = null }, onDismiss = close)
+        Sheet.ARCHIVE -> ArchiveSheet(
+            s,
+            onDate = vm::archiveSetDate, onSite = vm::archiveSetSite,
+            onLoad = { vm.archiveLoad(it); sheet = null },
+            onDismiss = { if (s.archive?.index == null) vm.exitArchive(); sheet = null },
+        )
         Sheet.RADARS -> RadarsSheet(
             s,
             onSelect = { vm.selectSite(it); sheet = null },
@@ -283,6 +311,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 onSatellite = vm::setSatellite,
                 onUnits = vm::setUnits,
                 onLightning = vm::setLightning,
+                onCells = vm::setShowCells,
+                onTracks = vm::setTrackOverlay,
                 onRedNight = vm::setRedNight,
                 onWarnings = vm::setShowWarnings,
                 onDownload = { baseMap.visibleBounds()?.let { b -> vm.downloadVisibleMap(b, density) } },
@@ -589,6 +619,8 @@ private fun LayersSheet(
     onUnits: (app.hookline.radar.core.data.UnitSystem) -> Unit,
     onRedNight: (Boolean) -> Unit,
     onLightning: (Boolean) -> Unit,
+    onCells: (Boolean) -> Unit,
+    onTracks: (app.hookline.radar.core.data.MrmsTracks.Product?) -> Unit,
     onDownload: () -> Unit,
     onDelete: (Long) -> Unit,
     onDismiss: () -> Unit,
@@ -608,6 +640,15 @@ private fun LayersSheet(
             ToggleRow("Satellite where there's no radar", "Infrared clouds from GOES, Meteosat and Himawari", s.satellite, onSatellite)
             ToggleRow("Warnings on the map", "NWS in the US, MeteoAlarm in Europe", s.showWarnings, onWarnings)
             ToggleRow("Lightning", s.lightningInfo ?: "Americas: NOAA GOES, about 1 MB a minute. Europe and Africa: Meteosat.", s.lightning, onLightning)
+            ToggleRow("Storm cells", "Rings and 30-minute paths for storms of 40 dBZ and up", s.showCells, onCells)
+            Text("US hail and rotation", style = Hookline.type.body, color = c.ink)
+            PillRow {
+                listOf(null to "Off", app.hookline.radar.core.data.MrmsTracks.Product.HAIL_24H to "Hail 24 h",
+                    app.hookline.radar.core.data.MrmsTracks.Product.ROTATION_60M to "Rotation 1 h").forEach { (p, label) ->
+                    SelectPill(label, selected = s.trackOverlay == p, onClick = { onTracks(p) }, modifier = Modifier.weight(1f))
+                }
+            }
+            s.overlayInfo?.let { Text(it, style = Hookline.type.caption, color = c.inkSecondary) }
             ToggleRow("Night vision", "Everything in dim red, to keep your eyes adjusted outdoors", s.redNight, onRedNight)
             Text("Units", style = Hookline.type.body, color = c.ink)
             PillRow {
