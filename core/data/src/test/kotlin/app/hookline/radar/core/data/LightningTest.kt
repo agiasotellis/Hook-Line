@@ -12,8 +12,8 @@ class LightningTest {
         assertEquals(35.2f, flashes[0].lat, 1e-4f)
         assertEquals(-95.0f, flashes[1].lon, 1e-4f)
         val start = Instant.parse("2026-10-06T12:00:00Z").toEpochMilli()
-        assertEquals(start + 500, flashes[0].timeMillis.toDouble(), 5.0)
-        assertEquals(start + 19_900, flashes[2].timeMillis.toDouble(), 5.0)
+        assertEquals((start + 500).toDouble(), flashes[0].timeMillis.toDouble(), 5.0)
+        assertEquals((start + 19_900).toDouble(), flashes[2].timeMillis.toDouble(), 5.0)
     }
 
     @Test fun keyTimesAndPrefixes() {
