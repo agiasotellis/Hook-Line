@@ -143,7 +143,7 @@ class WarningRegions private constructor(val regions: Map<String, Region>) {
             val d = DataInputStream(input.buffered())
             val magic = ByteArray(4).also { d.readFully(it) }
             if (String(magic, Charsets.US_ASCII) != "HLRG") throw IOException("Bad regions file")
-            val version = Short.reverseBytes(d.readShort()).toInt()
+            val version = java.lang.Short.reverseBytes(d.readShort()).toInt()
             if (version != 1) throw IOException("Unsupported regions version $version")
             val count = Integer.reverseBytes(d.readInt())
             val out = LinkedHashMap<String, Region>(count * 2)
