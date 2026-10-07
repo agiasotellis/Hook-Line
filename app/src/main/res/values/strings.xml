@@ -5,4 +5,5 @@
     <string name="channel_storm_mode">Storm Mode status</string>
     <string name="storm_mode_running">Checking NWS warnings every 60 s</string>
     <string name="disclaimer">Follow official NWS and local guidance. Hookline shows NWS data and isn\'t a warning service.</string>
+    <string name="widget_description">Radar around your place, rain in the next hour and warnings</string>
 </resources>

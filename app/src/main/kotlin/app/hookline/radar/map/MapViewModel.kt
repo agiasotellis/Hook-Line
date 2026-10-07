@@ -10,6 +10,9 @@ import app.hookline.radar.core.data.Coverage
 import app.hookline.radar.core.data.DwdDualPol
 import app.hookline.radar.core.data.EumetsatLayers
 import app.hookline.radar.core.data.Fmt
+import app.hookline.radar.core.data.Flash
+import app.hookline.radar.core.data.GlmLightning
+import app.hookline.radar.stormmode.Place
 import app.hookline.radar.core.data.UnitSystem
 import app.hookline.radar.core.data.Imagery
 import app.hookline.radar.core.data.ImagerySource
@@ -149,6 +152,11 @@ data class MapUiState(
     val redNight: Boolean = false,
     /** Non-null while the measure tool is open. */
     val measure: Measure? = null,
+    val places: List<Place> = emptyList(),
+    val rainWifiOnly: Boolean = false,
+    val lightning: Boolean = false,
+    /** Lightning status line, e.g. "124 flashes in the last 15 min". */
+    val lightningInfo: String? = null,
     val intensity: MapIntensity = MapIntensity(),
     val loopLength: Int = 12,
     val camera: CameraTarget? = null,
@@ -181,6 +189,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val checker = AlertChecker(app)
     private val meteoAlarm = MeteoAlarm(http)
     private val dwd = DwdDualPol(http)
+    private val glm = GlmLightning(http)
 
     val offline = OfflineMaps(app)
 
@@ -194,7 +203,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             // One render origin for the whole session: every layer is placed relative to it.
             origin = MercatorProjector(startCamera.lat, startCamera.lon),
             camera = startCamera,
-            stormModeOn = checker.enabled && checker.places().isNotEmpty(),
+            stormModeOn = checker.enabled && checker.allPlaces().isNotEmpty(),
             stormModeEnabled = checker.enabled,
             homeLabel = checker.homeLabel(),
             euMinLevel = checker.euMinLevel,
@@ -203,6 +212,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             units = prefs.getString("units", null)?.let { runCatching { UnitSystem.valueOf(it) }.getOrNull() }
                 ?: UnitSystem.forCountry(Locale.getDefault().country),
             redNight = prefs.getBoolean("red_night", false),
+            places = checker.allPlaces(),
+            rainWifiOnly = checker.store.rainOnWifiOnly,
+            lightning = prefs.getBoolean("lightning", false),
         ),
     )
     val state: StateFlow<MapUiState> = _state.asStateFlow()
@@ -237,6 +249,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private var regions: WarningRegions? = null
     private var eumetsat: EumetsatLayers? = null
 
+    // lightning (GOES GLM, Americas)
+    private var flashes: List<Flash> = emptyList()
+    private val glmKnown = LinkedHashSet<String>()
+    private var lightningJob: Job? = null
+
     // German dual-pol (DWD)
     private val dualPol = HashMap<Moment, DwdDualPol.Result>()
     private var dualPolJob: Job? = null
@@ -255,6 +272,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch { eumetsat = loadEumetsatLayers(); updateImagery() }
+        if (_state.value.lightning) startLightning()
         // Imagery URLs carry the time: refresh them every 5 minutes.
         viewModelScope.launch { while (isActive) { delay(300_000); updateImagery() } }
     }
@@ -305,7 +323,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         decideSource()
         if (_state.value.mode == Mode.COMPOSITE) refreshCompositeTile(force = false)
         updateVisibleWarnings()
-        if (_state.value.measure != null) rebuildOverlays()
+        if (_state.value.measure != null || _state.value.lightning || _state.value.places.isNotEmpty()) rebuildOverlays()
         // New countries in view: fetch their warnings soon rather than at the next minute.
         regions?.let { r ->
             bounds?.let { b ->
@@ -388,6 +406,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val list = mutableListOf<Pair<ImagerySource, Float>>()
         if (s.satellite && s.mode == Mode.NONE) list += Imagery.satellites(eumetsat).map { it to 0.75f }
         if (s.mode == Mode.MOSAIC) list += Imagery.mrms(System.currentTimeMillis() / 300_000) to 0.9f
+        if (s.lightning) list += Imagery.mtgLightning() to 0.95f
         _state.update { it.copy(imagery = list, attribution = attributionFor(it.mode, it.site)) }
     }
 
@@ -414,8 +433,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             _state.value.satellite -> Imagery.GIBS_ATTRIBUTION + "; " + Imagery.eumetsatAttribution(java.time.Year.now().value)
             else -> ""
         }
+        val lightning = if (_state.value.lightning) "Lightning: NOAA GOES GLM; contains modified EUMETSAT Meteosat data" else ""
         val eu = if (euFeeds.isNotEmpty() && mode != Mode.MOSAIC && site?.network != Network.NEXRAD) "Warnings: MeteoAlarm / EUMETNET" else ""
-        return listOf(radar, eu).filter { it.isNotEmpty() }.joinToString(". ")
+        return listOf(radar, eu, lightning).filter { it.isNotEmpty() }.joinToString(". ")
     }
 
     // ---- user actions ---------------------------------------------------------------
@@ -537,6 +557,132 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     /** Marker size grows when zoomed out so it stays visible. */
     private fun mapZoomScale(): Double = Math.pow(2.0, (8.0 - mapZoom).coerceIn(0.0, 6.0)) - 1
 
+    // ---- places ----------------------------------------------------------------------
+
+    private fun refreshPlaces() = _state.update { it.copy(places = checker.allPlaces(), rainWifiOnly = checker.store.rainOnWifiOnly) }
+
+    /** Saves the map centre as a place and checks it straight away. */
+    fun addPlace(name: String) {
+        val c = mapCenter
+        viewModelScope.launch {
+            val region = if (Coverage.inUs(c)) null else withContext(Dispatchers.Default) { regions?.regionAt(c)?.code }
+            checker.store.add(name.trim(), c.lat, c.lon, region)
+            refreshPlaces()
+            rebuildOverlays()
+            runCheckSoon()
+        }
+    }
+
+    fun removePlace(id: Long) {
+        checker.store.remove(id)
+        refreshPlaces(); rebuildOverlays()
+    }
+
+    fun setPlaceWarnings(id: Long, on: Boolean) {
+        if (id == 0L) checker.store.currentWarnings = on else checker.store.update(id) { it.copy(warnings = on) }
+        refreshPlaces()
+    }
+
+    fun setPlaceRain(id: Long, on: Boolean) {
+        if (id == 0L) checker.store.currentRain = on else checker.store.update(id) { it.copy(rain = on) }
+        refreshPlaces()
+        if (on) runCheckSoon()
+    }
+
+    fun setRainWifiOnly(on: Boolean) {
+        checker.store.rainOnWifiOnly = on
+        refreshPlaces()
+    }
+
+    fun showPlace(p: Place) = flyTo(p.lat, p.lon, 8.0)
+
+    /** Runs the Storm Mode check now (warnings, rain outlook, widget) and refreshes the list after. */
+    private fun runCheckSoon() {
+        androidx.work.WorkManager.getInstance(getApplication())
+            .enqueue(androidx.work.OneTimeWorkRequestBuilder<app.hookline.radar.stormmode.StormModeWorker>().build())
+        viewModelScope.launch { delay(20_000); refreshPlaces(); delay(40_000); refreshPlaces() }
+    }
+
+    private fun placeOutlines(o: MercatorProjector): List<Outline> = _state.value.places.map { p ->
+        val pts = FloatArray(8)
+        for ((i, b) in listOf(0.0, 90.0, 180.0, 270.0).withIndex()) {
+            val (la, lo) = RadialGeometry.destination(p.lat, p.lon, b, 1_800.0 * (1 + mapZoomScale()))
+            val (x, y) = o.fromLatLon(la, lo)
+            pts[i * 2] = x.toFloat(); pts[i * 2 + 1] = y.toFloat()
+        }
+        Outline(pts, 0xFFE8E4DA.toInt(), 2.5f)
+    }
+
+    // ---- lightning ------------------------------------------------------------------------
+
+    fun setLightning(on: Boolean) {
+        prefs.edit().putBoolean("lightning", on).apply()
+        _state.update { it.copy(lightning = on, lightningInfo = null) }
+        if (on) startLightning() else {
+            lightningJob?.cancel(); lightningJob = null
+            flashes = emptyList(); glmKnown.clear()
+            rebuildOverlays()
+        }
+        updateImagery()
+    }
+
+    private fun startLightning() {
+        if (lightningJob?.isActive == true) return
+        lightningJob = viewModelScope.launch {
+            var bucket: String? = null
+            while (isActive) {
+                val b = glm.bucketFor(mapCenter)
+                if (b != bucket) { flashes = emptyList(); glmKnown.clear(); bucket = b }
+                if (b != null) {
+                    val now = System.currentTimeMillis()
+                    try {
+                        val since = maxOf(now - LIGHTNING_WINDOW, (flashes.maxOfOrNull { it.timeMillis } ?: 0L) - 20_000)
+                        val (fresh, keys) = glm.fetchNew(b, since, glmKnown, maxFiles = if (glmKnown.isEmpty()) 15 else 6)
+                        glmKnown += keys
+                        while (glmKnown.size > 200) glmKnown.remove(glmKnown.first())
+                        flashes = (flashes + fresh).filter { now - it.timeMillis < LIGHTNING_WINDOW }.takeLast(4_000)
+                        _state.update { it.copy(lightningInfo = "${flashes.size} flashes in the last 15 min (GOES ${if (b.endsWith("18")) "West" else "East"})") }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        _state.update { it.copy(lightningInfo = "Lightning not updating: ${e.message}") }
+                    }
+                } else {
+                    _state.update {
+                        it.copy(lightningInfo = if (Coverage.inOperaComposite(mapCenter) || mapCenter.lon in -20.0..60.0) "Lightning from Meteosat (may lag a few minutes)" else "No lightning data here")
+                    }
+                }
+                rebuildOverlays()
+                delay(60_000)
+            }
+        }
+    }
+
+    /** "+" marks, brightest for the newest flashes. */
+    private fun lightningOutlines(o: MercatorProjector): List<Outline> {
+        if (flashes.isEmpty()) return emptyList()
+        val now = System.currentTimeMillis()
+        val r = 1_500.0 * (1 + mapZoomScale())
+        val out = ArrayList<Outline>(flashes.size * 2)
+        for (f in flashes) {
+            val age = now - f.timeMillis
+            val argb = when {
+                age < 2 * 60_000 -> 0xFFFFFFFF.toInt()
+                age < 5 * 60_000 -> 0xFFFFE14D.toInt()
+                age < 10 * 60_000 -> 0xFFF2902B.toInt()
+                else -> 0xB3C0392B.toInt()
+            }
+            val lat = f.lat.toDouble(); val lon = f.lon.toDouble()
+            val (n0, n1) = o.fromLatLon(RadialGeometry.destination(lat, lon, 0.0, r).first, lon)
+            val (s0, s1) = o.fromLatLon(RadialGeometry.destination(lat, lon, 180.0, r).first, lon)
+            val e = RadialGeometry.destination(lat, lon, 90.0, r); val w = RadialGeometry.destination(lat, lon, 270.0, r)
+            val (e0, e1) = o.fromLatLon(e.first, e.second); val (w0, w1) = o.fromLatLon(w.first, w.second)
+            out += Outline(floatArrayOf(n0.toFloat(), n1.toFloat(), s0.toFloat(), s1.toFloat()), argb, 2f, closed = false)
+            out += Outline(floatArrayOf(e0.toFloat(), e1.toFloat(), w0.toFloat(), w1.toFloat()), argb, 2f, closed = false)
+        }
+        return out
+    }
+
     fun setSatellite(on: Boolean) {
         prefs.edit().putBoolean("satellite", on).apply()
         _state.update { it.copy(satellite = on) }
@@ -564,7 +710,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (on) app.hookline.radar.stormmode.StormModeWorker.schedule(getApplication())
         else app.hookline.radar.stormmode.StormModeWorker.cancel(getApplication())
         _state.update {
-            it.copy(stormModeEnabled = on, stormModeOn = on && checker.places().isNotEmpty(), homeLabel = checker.homeLabel())
+            it.copy(
+                stormModeEnabled = on, stormModeOn = on && checker.allPlaces().isNotEmpty(), homeLabel = checker.homeLabel(),
+                places = checker.allPlaces(),
+            )
         }
     }
 
@@ -1091,6 +1240,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (_state.value.showWarnings) list += euOutlines(o)
         list += measureOutlines(o)
+        list += placeOutlines(o)
+        if (_state.value.lightning) list += lightningOutlines(o)
         for (a in alerts) {
             if (!_state.value.showWarnings) break
             val (argb, width) = when (a.hazard) {
@@ -1216,6 +1367,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         /** Zoom at which the map switches from the composite to the nearest single radar. */
         const val SITE_ZOOM = 6.0
+        private const val LIGHTNING_WINDOW = 15 * 60_000L
         private const val RING_SEGMENTS = 120
         private val TIME = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
         fun clock(millis: Long): String = TIME.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))

@@ -87,6 +87,23 @@ object Imagery {
         attribution = MRMS_ATTRIBUTION,
     )
 
+    /**
+     * Meteosat Third Generation Lightning Imager: accumulated flash area,
+     * 5-minute images over Europe and Africa (EUMETView WMS, CC BY 4.0).
+     */
+    fun mtgLightning(now: Instant = Instant.now()): ImagerySource {
+        val t = now.minus(15, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.MINUTES)
+        val five = t.minusSeconds((t.epochSecond / 60 % 5) * 60)
+        return ImagerySource(
+            id = "lightning-mtg",
+            url = "https://view.eumetsat.int/geoserver/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&STYLES=&CRS=EPSG:3857" +
+                "&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=true&BBOX={bbox-epsg-3857}&LAYERS=mtg_fd:li_afa" +
+                "&TIME=" + DateTimeFormatter.ISO_INSTANT.format(five),
+            maxZoom = 8, west = -60.0, east = 60.0, south = -70.0, north = 70.0,
+            attribution = "Lightning: contains modified EUMETSAT Meteosat data",
+        )
+    }
+
     /** Where the NWS mosaic has data: CONUS and southern Canada, Alaska, Hawaii, Puerto Rico, Guam. */
     fun inMrms(p: LatLon): Boolean =
         (p.lat in 20.0..55.0 && p.lon in -130.0..-60.0) ||

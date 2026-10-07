@@ -263,6 +263,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         )
         Sheet.WARNINGS -> WarningsSheet(s, onShow = { vm.showWarning(it); sheet = null }, onDismiss = close)
         Sheet.STORM -> StormModeSheet(s, onToggle = vm::setStormMode, onLevel = vm::setEuMinLevel, onDismiss = close)
+        Sheet.PLACES -> PlacesSheet(
+            s,
+            onAdd = vm::addPlace, onRemove = vm::removePlace,
+            onWarnings = vm::setPlaceWarnings, onRain = vm::setPlaceRain, onWifiOnly = vm::setRainWifiOnly,
+            onShow = { vm.showPlace(it); sheet = null },
+            onDismiss = close,
+        )
         Sheet.GUIDE -> GuideSheet(close)
         Sheet.ABOUT -> AboutSheet(close)
         Sheet.LAYERS -> {
@@ -275,6 +282,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 onLoopLength = vm::setLoopLength,
                 onSatellite = vm::setSatellite,
                 onUnits = vm::setUnits,
+                onLightning = vm::setLightning,
                 onRedNight = vm::setRedNight,
                 onWarnings = vm::setShowWarnings,
                 onDownload = { baseMap.visibleBounds()?.let { b -> vm.downloadVisibleMap(b, density) } },
@@ -580,6 +588,7 @@ private fun LayersSheet(
     onWarnings: (Boolean) -> Unit,
     onUnits: (app.hookline.radar.core.data.UnitSystem) -> Unit,
     onRedNight: (Boolean) -> Unit,
+    onLightning: (Boolean) -> Unit,
     onDownload: () -> Unit,
     onDelete: (Long) -> Unit,
     onDismiss: () -> Unit,
@@ -598,6 +607,7 @@ private fun LayersSheet(
             Text("Layers", style = Hookline.type.title, color = c.ink)
             ToggleRow("Satellite where there's no radar", "Infrared clouds from GOES, Meteosat and Himawari", s.satellite, onSatellite)
             ToggleRow("Warnings on the map", "NWS in the US, MeteoAlarm in Europe", s.showWarnings, onWarnings)
+            ToggleRow("Lightning", s.lightningInfo ?: "Americas: NOAA GOES, about 1 MB a minute. Europe and Africa: Meteosat.", s.lightning, onLightning)
             ToggleRow("Night vision", "Everything in dim red, to keep your eyes adjusted outdoors", s.redNight, onRedNight)
             Text("Units", style = Hookline.type.body, color = c.ink)
             PillRow {

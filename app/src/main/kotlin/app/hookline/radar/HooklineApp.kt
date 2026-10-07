@@ -14,6 +14,9 @@ class HooklineApp : Application() {
             NotificationChannel(CHANNEL_WARNINGS, getString(R.string.channel_warnings), NotificationManager.IMPORTANCE_HIGH)
         )
         nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_RAIN, "Rain starting soon", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        nm.createNotificationChannel(
             NotificationChannel(CHANNEL_STORM_MODE, getString(R.string.channel_storm_mode), NotificationManager.IMPORTANCE_LOW)
         )
         // "Watching" is the default Storm Mode state chosen at onboarding.
@@ -23,5 +26,6 @@ class HooklineApp : Application() {
     companion object {
         const val CHANNEL_WARNINGS = "warnings"
         const val CHANNEL_STORM_MODE = "storm_mode"
+        const val CHANNEL_RAIN = "rain"
     }
 }

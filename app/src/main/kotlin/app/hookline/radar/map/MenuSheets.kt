@@ -64,7 +64,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 /** The sheets reachable from the main menu. */
-enum class Sheet { MENU, RADARS, LAYERS, WARNINGS, STORM, GUIDE, ABOUT }
+enum class Sheet { MENU, RADARS, LAYERS, WARNINGS, STORM, PLACES, GUIDE, ABOUT }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,6 +108,11 @@ fun MenuSheet(s: MapUiState, onPick: (Sheet) -> Unit, onDismiss: () -> Unit) {
                 else -> "Watching ${s.homeLabel}"
             },
         ) { onPick(Sheet.STORM) }
+        MenuRow(
+            "Places",
+            s.places.firstOrNull { it.outlook != null }?.let { "${it.name}: ${it.outlook}" }
+                ?: if (s.places.isEmpty()) "Save places for warnings and rain alerts" else "${s.places.size} watched",
+        ) { onPick(Sheet.PLACES) }
         MenuRow("Layers, loops and offline maps", if (s.satellite) "Satellite where there's no radar" else "Satellite off") { onPick(Sheet.LAYERS) }
         MenuRow("Guide", "What the colours mean, gestures") { onPick(Sheet.GUIDE) }
         MenuRow("About and data sources", "Version ${BuildConfig.VERSION_NAME}") { onPick(Sheet.ABOUT) }
@@ -249,6 +254,70 @@ fun WarningsSheet(s: MapUiState, onShow: (WarningItem) -> Unit, onDismiss: () ->
     }
 }
 
+// ---- places ---------------------------------------------------------------------------------------
+
+@Composable
+fun PlacesSheet(
+    s: MapUiState,
+    onAdd: (String) -> Unit,
+    onRemove: (Long) -> Unit,
+    onWarnings: (Long, Boolean) -> Unit,
+    onRain: (Long, Boolean) -> Unit,
+    onWifiOnly: (Boolean) -> Unit,
+    onShow: (app.hookline.radar.stormmode.Place) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = Hookline.colors
+    var name by remember { mutableStateOf("") }
+    HooklineSheet(onDismiss) {
+        Text("Places", style = Hookline.type.title, color = c.ink)
+        Text(
+            "Storm Mode watches each place for official warnings and rain starting in the next hour. The widget shows the first place with rain alerts on.",
+            style = Hookline.type.caption, color = c.inkSecondary,
+        )
+        s.places.forEach { p ->
+            Column(
+                Modifier.fillMaxWidth().background(c.chrome, RoundedCornerShape(10.dp)).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(p.name, style = Hookline.type.control, color = c.ink)
+                        Text(p.outlook ?: "Not checked yet", style = Hookline.type.caption, color = c.inkSecondary)
+                    }
+                    Text("Show", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable { onShow(p) }.padding(10.dp))
+                    if (p.id != 0L) {
+                        Text("Delete", style = Hookline.type.control, color = c.inkSecondary, modifier = Modifier.clickable { onRemove(p.id) }.padding(10.dp))
+                    }
+                }
+                ToggleRow("Warnings", null, p.warnings) { onWarnings(p.id, it) }
+                ToggleRow("Rain starting soon", null, p.rain) { onRain(p.id, it) }
+            }
+        }
+        Text("Add a place", style = Hookline.type.control, color = c.ink, modifier = Modifier.padding(top = 6.dp))
+        Text("Move the map so the place is in the centre, name it and save.", style = Hookline.type.caption, color = c.inkSecondary)
+        OutlinedTextField(
+            value = name, onValueChange = { name = it }, singleLine = true,
+            placeholder = { Text("Name, e.g. Work", style = Hookline.type.body) },
+            modifier = Modifier.fillMaxWidth(), textStyle = Hookline.type.body,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = c.ink, unfocusedTextColor = c.ink,
+                focusedBorderColor = c.ink, unfocusedBorderColor = c.hairline, cursorColor = c.ink,
+                focusedPlaceholderColor = c.inkSecondary, unfocusedPlaceholderColor = c.inkSecondary,
+            ),
+        )
+        Box(
+            Modifier.fillMaxWidth().height(52.dp).background(c.ink, CircleShape).clickable { onAdd(name); name = "" },
+            contentAlignment = Alignment.Center,
+        ) { Text("Save the map centre", style = Hookline.type.control, color = c.inkOnSelected) }
+        ToggleRow(
+            "Rain checks on Wi-Fi only",
+            "Each check downloads 1–3 MB. Otherwise every 30 min on mobile data, about 100 MB a month.",
+            s.rainWifiOnly, onWifiOnly,
+        )
+    }
+}
+
 // ---- storm mode -----------------------------------------------------------------------------------
 
 @Composable
@@ -343,6 +412,10 @@ fun GuideSheet(onDismiss: () -> Unit) {
         Section("ZDR – differential reflectivity", "Shape of the targets. Large flattened raindrops read high; hail and snow read near zero.")
         Section("Tilts", "The ladder on the right picks the beam angle. The lowest is closest to the ground; higher ones look into the upper storm.")
         Section("Loops", "Press play at the bottom. Drag along the tape to step through frames. Loops use the lowest tilt.")
+        Section("Your location and measuring", "The target button shows where you are and follows you as you move. The ruler measures distance and bearing between two taps, and how long a storm at the current speed takes to cover it.")
+        Section("Rain starting soon", "For each place, Hookline looks at the latest radar and how the rain is moving, and tells you when rain should arrive in the next hour. It can't foresee storms that haven't formed yet.")
+        Section("Lightning", "Crosses are lightning flashes in the last 15 minutes, white for the newest. Americas: NOAA GOES satellites. Europe and Africa: Meteosat's lightning imager, shown as shaded areas.")
+        Section("Sharing", "The share button sends a picture of the map, or the loop as an animated GIF, with the data credits included.")
         Section("Warnings", "Coloured outlines on the map: NWS warnings in the US; yellow, orange and red MeteoAlarm warnings in Europe. Open the menu for the full text.")
     }
 }
@@ -362,6 +435,8 @@ fun AboutSheet(onDismiss: () -> Unit) {
         Section("German dual-pol (CC, ZDR)", "Source: Deutscher Wetterdienst. Licence CC BY 4.0.")
         Section("European warnings", "MeteoAlarm, EUMETNET and the national weather services. Licence CC BY 4.0. Region outlines from MeteoAlarm geocodes, simplified.")
         Section("Satellite", "Imagery from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS): NOAA GOES-East and GOES-West, JMA Himawari. Contains modified EUMETSAT Meteosat data (CC BY 4.0), hourly.")
+        Section("Lightning", "Americas: NOAA GOES-East/West Geostationary Lightning Mapper via NOAA Open Data Dissemination. Europe and Africa: contains modified EUMETSAT Meteosat data (MTG Lightning Imager, CC BY 4.0).")
+        Section("Rain alerts", "EUMETNET OPERA rain-rate composite (CC BY 4.0) in Europe; NOAA MRMS in the US.")
         Section("Base map", "OpenFreeMap, OpenMapTiles, © OpenStreetMap contributors.")
         Text(
             "Hookline is not affiliated with or endorsed by any of these organisations.",
