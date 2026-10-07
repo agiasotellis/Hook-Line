@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:IT;font-weight:600;src:url(assets/inter-tight-latin-600-normal.woff2)}
+@font-face{font-family:IT;font-weight:600;src:url(assets/inter-tight-greek-600-normal.woff2);unicode-range:U+0370-03FF,U+1F00-1FFF}
+@font-face{font-family:ITG;font-weight:500;src:url(assets/inter-tight-greek-500-normal.woff2);unicode-range:U+0370-03FF,U+1F00-1FFF}
+@font-face{font-family:PM;font-weight:500;src:url(assets/ibm-plex-mono-latin-500-normal.woff2)}
+html,body{margin:0;background:#0A0E12}
+.shot{position:relative;width:1080px;height:2160px;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#18212A 0%,#0A0E12 70%);font-family:IT;color:#ECE8DF}
+.cap{position:absolute;left:90px;right:90px;top:150px;font-weight:600;font-size:92px;line-height:1.04;letter-spacing:-.03em}
+.sub{position:absolute;left:94px;right:90px;top:470px;font-family:PM,ITG;font-weight:500;font-size:28px;letter-spacing:.12em;text-transform:uppercase;color:#9AA5AE;line-height:1.5}
+.ph{position:absolute;left:50%;top:640px;width:900px;transform:translateX(-50%);filter:drop-shadow(0 40px 80px rgba(0,0,0,.6))}
+.mark{position:absolute;left:90px;top:84px}
+.fg{position:relative;width:1024px;height:500px;overflow:hidden;background:#0A0E12;font-family:IT;color:#ECE8DF}
+.icon{width:512px;height:512px;background:#141B22;display:flex;align-items:center;justify-content:center}
+</style></head><body><div id="root"></div>
+<script>
+const MARK = (fill='#E8E4DA') => `<g transform="translate(16 0) skewX(-9)"><g transform="translate(4 0)"><rect x="36" y="32" width="28" height="136" fill="${fill}"/><rect x="60" y="84" width="74" height="26" fill="${fill}"/><path d="M142 32 V130 A24 24 0 0 1 94 130" fill="none" stroke="${fill}" stroke-width="28"/><rect x="80" y="112" width="28" height="19" fill="#E4472F"/></g></g>`;
+const T = {
+  en: { ref: ['Every tilt.<br>Every product.', 'REF · VEL · SRV · CC · ZDR · raw Level II'],
+        vel: ['See the rotation.', 'Velocity and storm-relative velocity'],
+        cc: ['Debris and hail<br>stand out.', 'Dual-pol CC · US and German radars'],
+        warn: ['Warnings the moment<br>they\'re issued.', 'NWS · MeteoAlarm · Storm Mode'],
+        track: ['Storm tracks and<br>cross-sections.', 'Arrival times · hail risk · vertical slices'],
+        fg: ['Professional weather radar.', 'Buy once. US and Europe.'] },
+  el: { ref: ['Κάθε γωνία.<br>Κάθε προϊόν.', 'REF · VEL · SRV · CC · ZDR · Level II'],
+        vel: ['Δείτε την<br>περιστροφή.', 'Ταχύτητα και ταχύτητα ως προς την καταιγίδα'],
+        cc: ['Συντρίμμια και χαλάζι<br>ξεχωρίζουν.', 'Διπλή πόλωση CC · ραντάρ ΗΠΑ και Γερμανίας'],
+        warn: ['Προειδοποιήσεις<br>τη στιγμή που εκδίδονται.', 'NWS · MeteoAlarm · Λειτουργία καταιγίδας'],
+        track: ['Πορείες καταιγίδων<br>και κατακόρυφες τομές.', 'Ώρα άφιξης · κίνδυνος χαλαζιού · τομές'],
+        fg: ['Επαγγελματικό ραντάρ καιρού.', 'Μία αγορά. ΗΠΑ και Ευρώπη.'] },
+  de: { ref: ['Jede Elevation.<br>Jedes Produkt.', 'REF · VEL · SRV · CC · ZDR · Level II'],
+        vel: ['Rotation<br>sichtbar machen.', 'Radialgeschwindigkeit, auch sturmrelativ'],
+        cc: ['Trümmer und Hagel<br>stechen hervor.', 'Dual-Pol CC · Radare in USA und Deutschland'],
+        warn: ['Warnungen, sobald<br>sie ausgegeben werden.', 'NWS · MeteoAlarm · Sturmmodus'],
+        track: ['Zugbahnen und<br>Querschnitte.', 'Ankunftszeit · Hagelrisiko · Vertikalschnitte'],
+        fg: ['Profi-Wetterradar.', 'Einmal kaufen. USA und Europa.'] },
+};
+window.show = (mode, lang, key) => {
+  const r = document.getElementById('root');
+  if (mode === 'shot') {
+    const [cap, sub] = T[lang][key];
+    r.innerHTML = `<div class="shot"><svg class="mark" viewBox="0 0 200 200" width="64" height="64">${MARK()}</svg>
+      <div class="cap">${cap}</div><div class="sub">${sub}</div><img class="ph" src="storeraw/${key}.png"></div>`;
+  } else if (mode === 'fg') {
+    const [a, b] = T[lang].fg;
+    r.innerHTML = `<div class="fg"><img src="assets/stage_ref.png" style="position:absolute;left:330px;top:-260px;width:1100px;opacity:.95">
+      <div style="position:absolute;inset:0;background:linear-gradient(90deg,#0A0E12 34%,rgba(10,14,18,.75) 52%,rgba(10,14,18,0) 75%)"></div>
+      <svg viewBox="0 0 200 200" width="92" height="92" style="position:absolute;left:60px;top:120px">${MARK()}</svg>
+      <div style="position:absolute;left:170px;top:122px;font-weight:600;font-size:84px;letter-spacing:-.035em">Hookline</div>
+      <div style="position:absolute;left:66px;top:260px;font-weight:600;font-size:34px;letter-spacing:-.01em">${a}</div>
+      <div style="position:absolute;left:68px;top:312px;font-family:PM,ITG;font-weight:500;font-size:19px;letter-spacing:.12em;text-transform:uppercase;color:#9AA5AE">${b}</div></div>`;
+  } else {
+    r.innerHTML = `<div class="icon"><svg viewBox="0 0 200 200" width="330" height="330">${MARK()}</svg></div>`;
+  }
+  return Promise.all([...r.querySelectorAll('img')].map(i => i.complete ? 1 : new Promise(res => { i.onload = res; i.onerror = res; }))).then(() => document.fonts.ready);
+};
+</script></body></html>

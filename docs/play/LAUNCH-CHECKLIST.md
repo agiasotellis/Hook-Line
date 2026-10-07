@@ -16,7 +16,7 @@ These are code or repo changes; none were made by this paperwork pass.
 - [ ] **Privacy policy link inside the app** (About sheet). Required by Google's User Data policy in addition to the Play Console link.
 - [ ] **Location disclosure screen** before the first location prompt, explaining that the last location is used by Storm Mode in the background (wording in `declarations.md` → Location permissions). Storm Mode is on by default.
 - [ ] Optional: ask for the notification permission once after onboarding (otherwise Android 13+ users who never open the Storm Mode sheet get no warnings).
-- [ ] Optional, privacy: round the coordinates sent to `api.weather.gov/alerts/active?point=` (currently 4 decimals ≈ 10 m) to 2–3 decimals, or filter warnings on the device so that no coordinates leave the phone (see `data-safety.md`, judgement call A).
+- [x] Privacy: coordinates sent to `api.weather.gov/alerts/active?point=` are rounded to 2 decimals (about 1 km) since 1.0.0. (Filtering on the device instead would remove the location declaration entirely; see `data-safety.md`, judgement call A.)
 - [ ] About sheet affiliation sentence: make it explicit "does not represent any government" (see `declarations.md` → Government apps).
 - [ ] **NWS User-Agent** (`app/build.gradle.kts`): `HooklineRadar/0.1 (support@hookline.app)`. Make sure you own and read that address (or change it to `[YOUR CONTACT EMAIL]`), and bump the version string. NWS uses it to contact you if the app misbehaves.
 - [ ] Greek and German in-app translations actually ship in 1.0.0 (the listings say so).

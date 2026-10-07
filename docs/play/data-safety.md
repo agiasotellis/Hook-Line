@@ -16,7 +16,7 @@ This document gives the answer to type or tick for each question, followed by th
 | Location read only in the foreground: one-shot `LocationManager` fix on launch (coarse requested), precise requested only when the user taps the location/follow button; MapLibre location dot while the map is shown. | `map/DeviceLocation.kt`, `map/MapScreen.kt`, `map/BaseMap.kt` |
 | The last fix is stored on the device as the Storm Mode "Current location" (`storm_mode` prefs `home_lat/home_lon`). | `MapViewModel.onLocation` → `AlertChecker.setHome` |
 | Background: WorkManager every 15 min (`StormModeWorker`), Storm Mode on by default. Uses stored coordinates, never reads location. | `stormmode/StormModeWorker.kt`, `stormmode/AlertChecker.kt` |
-| **Only request that contains coordinates:** `GET https://api.weather.gov/alerts/active?point=<lat>,<lon>` with 4 decimals, made by the background check for each US place with warnings on. | `NwsAlerts.activeAt`, called only from `AlertChecker.check` |
+| **Only request that contains coordinates:** `GET https://api.weather.gov/alerts/active?point=<lat>,<lon>` rounded to 2 decimals (about 1 km), made by the background check for each US place with warnings on. | `NwsAlerts.activeAt`, called only from `AlertChecker.check` |
 | Foreground NWS request is nationwide (`/alerts/active?event=...`), no location. | `MapViewModel` line ~1572 (`activeEvents`) |
 | Map-area requests: OpenFreeMap vector tiles; NASA GIBS tiles (z/x/y); NOAA MRMS map service and EUMETSAT WMS (`bbox` of the tile). Radar requests name the radar station. MeteoAlarm requests name the country. | `BaseMap.kt`, `Imagery.kt`, `NexradSource.kt`, `OrdRadar.kt`, `DwdDualPol.kt`, `Warnings.kt` |
 | Rain alerts download whole composites (OPERA RATE for Europe, MRMS CONUS) and compute each place's outlook on the device. No coordinates sent. | `RainSource.kt`, `Nowcast.kt`, `AlertChecker.checkRain` |
@@ -64,9 +64,9 @@ Tick only the types marked **Declare**.
 | Data type | Answer |
 |---|---|
 | **Approximate location** | **Declare** |
-| **Precise location** | **Declare** |
+| **Precise location** | Do not declare (never leaves the phone; only ~1 km rounded coordinates are sent) |
 
-Reasoning: the app requests coarse location on launch and fine location when the user taps the location button. The stored position is sent with 4-decimal precision (~10 m) to api.weather.gov in the Storm Mode check. If the user granted only approximate location, what is sent is approximate; if precise, it is precise. Both types are therefore possible. Saved places are coordinates the user picked on the map; they are also sent to the NWS (US only). Google counts them as location if they represent the user's location ("user or device physical location"). They usually do (home, work).
+Reasoning: the app requests coarse location on launch and fine location when the user taps the location button. The stored position is rounded to 0.01° (about 1 km) before it is sent to api.weather.gov in the Storm Mode check (`NwsAlerts.activeAt`). Precise location never leaves the phone, so declare **Approximate location: collected and shared**, and **Precise location: not collected**. Saved places are coordinates the user picked on the map; they are also sent to the NWS (US only). Google counts them as location if they represent the user's location ("user or device physical location"). They usually do (home, work).
 
 Map-tile, radar-station and country requests also reveal approximate area, but they describe what is *viewed*, not the device, and do not change the answer since location is declared anyway.
 
@@ -97,9 +97,9 @@ Conservative alternative: declare **Crash logs – Collected, not shared, option
 
 ---
 
-## 3. Per-type questions (for Approximate location and Precise location)
+## 3. Per-type questions (for Approximate location)
 
-Play asks the same four questions for each declared type. Answers are identical for both.
+Play asks these four questions for each declared type.
 
 **Is this data collected, shared, or both?**
 → **Collected** and **Shared**. *Judgement call A.*
@@ -126,8 +126,8 @@ Not Analytics, not Developer communications, not Advertising or marketing, not F
 
 ## 4. Preview of what the store will show
 
-- **Data shared with third parties:** Location (approximate location, precise location) – App functionality.
-- **Data collected:** Location (approximate location, precise location) – App functionality, optional.
+- **Data shared with third parties:** Location (approximate location) – App functionality.
+- **Data collected:** Location (approximate location) – App functionality, optional.
 - **Security practices:** Data is encrypted in transit. (No "you can request deletion" badge if you answer No.)
 
 ---
@@ -136,7 +136,7 @@ Not Analytics, not Developer communications, not Advertising or marketing, not F
 
 | | Question | Recommended | Alternative |
 |---|---|---|---|
-| **A** | Location: shared? | Collected **and shared** (NWS is a third party, background request is automatic) | Collected only. Or change the app so it sends rounded coordinates (e.g. 2 decimals, ≈1 km) or uses NWS zone/county codes from a bundled lookup; that does not remove the declaration but reduces precision. Removing the `?point=` request altogether (e.g. filtering the nationwide list on the device, as the foreground code already does) would let you answer **No data collected**. |
+| **A** | Location: shared? (app now rounds to 0.01°, about 1 km, so only approximate location applies) | Collected **and shared** (NWS is a third party, background request is automatic) | Collected only. Or change the app so it sends rounded coordinates (e.g. 2 decimals, ≈1 km) or uses NWS zone/county codes from a bundled lookup; that does not remove the declaration but reduces precision. Removing the `?point=` request altogether (e.g. filtering the nationwide list on the device, as the foreground code already does) would let you answer **No data collected**. |
 | **B** | Deletion request mechanism | **No** (we hold nothing; NWS copy is outside our control) | Yes + privacy policy link |
 | **C** | Purchase history | Not declared (Play Billing collects it directly; app has no server) | Declare Purchase history: collected, required, App functionality |
 | **D** | Crash logs | Not declared (only sent by the user via the share sheet) | Declare Crash logs: collected, optional, App functionality |
