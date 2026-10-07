@@ -14,8 +14,8 @@ object OdimAdapter {
         Moment.REFLECTIVITY to listOf("DBZH", "DBZ", "TH", "T"),
         Moment.VELOCITY to listOf("VRADH", "VRAD", "VRADDH", "VRADV"),
         Moment.SPECTRUM_WIDTH to listOf("WRADH", "WRAD"),
-        Moment.DIFFERENTIAL_REFLECTIVITY to listOf("ZDR"),
-        Moment.CORRELATION_COEFFICIENT to listOf("RHOHV"),
+        Moment.DIFFERENTIAL_REFLECTIVITY to listOf("ZDR", "UZDR"),
+        Moment.CORRELATION_COEFFICIENT to listOf("RHOHV", "URHOHV"),
         Moment.DIFFERENTIAL_PHASE to listOf("PHIDP"),
     )
 

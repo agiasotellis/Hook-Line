@@ -23,8 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
@@ -57,11 +55,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.hookline.radar.core.data.Hazard
-import app.hookline.radar.core.data.RadarSite
+import app.hookline.radar.core.data.WarningItem
 import app.hookline.radar.core.designsystem.ChromePanel
 import app.hookline.radar.core.designsystem.Dimens
-import app.hookline.radar.core.designsystem.HazardColors
 import app.hookline.radar.core.designsystem.HazardSwatch
 import app.hookline.radar.core.designsystem.Hookline
 import app.hookline.radar.core.designsystem.PillRow
@@ -81,7 +77,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     // Views are created once and outlive recompositions.
     val radar = remember { RadarGlView(context).also { it.renderer.setClearColor(0xFF141B22.toInt()) } }
     val baseMap = remember { BaseMap(context) }
-    var showLayers by remember { mutableStateOf(false) }
+    var sheet by remember { mutableStateOf<Sheet?>(null) }
 
     // The map owns gestures; the radar follows its camera exactly.
     LaunchedEffect(baseMap) {
@@ -93,6 +89,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     }
     LaunchedEffect(s.camera?.seq) { s.camera?.let { baseMap.moveTo(it.lat, it.lon, it.zoom) } }
     LaunchedEffect(s.intensity) { baseMap.setIntensity(s.intensity) }
+    LaunchedEffect(s.imagery) { baseMap.setImagery(s.imagery) }
 
     // Start where the user is (coarse location is enough to pick radars).
     val locationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -137,19 +134,24 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SiteChip(s, onSelect = vm::selectSite, onAuto = vm::setAutoSite)
+                ChromePanel(
+                    Modifier.size(Dimens.MinTouch).clickable { sheet = Sheet.MENU }.semantics { contentDescription = "Menu" },
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { MenuIcon(c.ink) }
+                }
+                SiteChip(s, onClick = { sheet = Sheet.RADARS })
                 s.homeWarning?.let { w ->
-                    WarningBanner(
-                        headline = w.event,
-                        detail = "Home" + (w.expires?.let { ", until " + MapViewModel.clock(it.toEpochMilli()) } ?: ""),
-                        hazard = w.hazard,
-                        modifier = Modifier.weight(1f),
-                    )
+                    WarningBanner(w, modifier = Modifier.weight(1f).clickable { sheet = Sheet.WARNINGS })
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 StatusChip(s.status, s.showingLatest, s.mode)
-                if (s.stormModeOn) Chip("Storm Mode on", dot = true)
+                if (s.warnings.isNotEmpty()) {
+                    Box(Modifier.clickable { sheet = Sheet.WARNINGS }) {
+                        Chip(if (s.warnings.size == 1) "1 warning" else "${s.warnings.size} warnings", swatch = Color(s.warnings.first().argb))
+                    }
+                }
+                if (s.stormModeOn) Box(Modifier.clickable { sheet = Sheet.STORM }) { Chip("Storm Mode", dot = true) }
             }
         }
 
@@ -160,7 +162,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         ) {
             TiltLadder(tilts = s.tilts, selected = s.tilt, onSelect = vm::selectTilt)
             ChromePanel(
-                Modifier.size(Dimens.MinTouch).clickable { showLayers = true }
+                Modifier.size(Dimens.MinTouch).clickable { sheet = Sheet.LAYERS }
                     .semantics { contentDescription = "Layers and offline maps" },
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { LayersIcon(c.ink) }
@@ -173,32 +175,59 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         }
     }
 
-    if (showLayers) {
-        val offline by vm.offline.ui.collectAsStateWithLifecycle()
-        val density = LocalDensity.current.density
-        LayersSheet(
-            intensity = s.intensity,
-            loopLength = s.loopLength,
-            offline = offline,
-            onIntensity = vm::setIntensity,
-            onLoopLength = vm::setLoopLength,
-            onDownload = { baseMap.visibleBounds()?.let { b -> vm.downloadVisibleMap(b, density) } },
-            onDelete = { id -> vm.offline.delete(id) },
-            onDismiss = { showLayers = false },
+    val close = { sheet = null }
+    when (sheet) {
+        Sheet.MENU -> MenuSheet(s, onPick = { sheet = it }, onDismiss = close)
+        Sheet.RADARS -> RadarsSheet(
+            s,
+            onSelect = { vm.selectSite(it); sheet = null },
+            onAuto = { vm.setAutoSite(); sheet = null },
+            onDismiss = close,
         )
+        Sheet.WARNINGS -> WarningsSheet(s, onShow = { vm.showWarning(it); sheet = null }, onDismiss = close)
+        Sheet.STORM -> StormModeSheet(s, onToggle = vm::setStormMode, onLevel = vm::setEuMinLevel, onDismiss = close)
+        Sheet.GUIDE -> GuideSheet(close)
+        Sheet.ABOUT -> AboutSheet(close)
+        Sheet.LAYERS -> {
+            val offline by vm.offline.ui.collectAsStateWithLifecycle()
+            val density = LocalDensity.current.density
+            LayersSheet(
+                s = s,
+                offline = offline,
+                onIntensity = vm::setIntensity,
+                onLoopLength = vm::setLoopLength,
+                onSatellite = vm::setSatellite,
+                onWarnings = vm::setShowWarnings,
+                onDownload = { baseMap.visibleBounds()?.let { b -> vm.downloadVisibleMap(b, density) } },
+                onDelete = { id -> vm.offline.delete(id) },
+                onDismiss = close,
+            )
+        }
+        null -> Unit
     }
 }
 
 @Composable
-private fun SiteChip(s: MapUiState, onSelect: (RadarSite) -> Unit, onAuto: () -> Unit) {
-    var open by remember { mutableStateOf(false) }
+private fun MenuIcon(color: Color) {
+    Canvas(Modifier.size(22.dp)) {
+        val stroke = 2.dp.toPx()
+        for (f in listOf(0.25f, 0.5f, 0.75f)) {
+            drawLine(color, Offset(size.width * 0.12f, size.height * f), Offset(size.width * 0.88f, size.height * f), stroke)
+        }
+    }
+}
+
+@Composable
+private fun SiteChip(s: MapUiState, onClick: () -> Unit) {
     val (title, subtitle) = when {
         s.mode == Mode.COMPOSITE -> "Europe" to "All radars combined"
+        s.mode == Mode.MOSAIC -> "US mosaic" to "Zoom in for a radar"
         s.site != null -> s.site.label to s.site.name
+        s.satellite -> "Satellite" to "No open radar here"
         else -> "No radar" to "No open data here"
     }
     Box {
-        ChromePanel(Modifier.height(Dimens.MinTouch).clickable { open = true }.semantics {
+        ChromePanel(Modifier.height(Dimens.MinTouch).clickable(onClick = onClick).semantics {
             contentDescription = "Radar: $title, $subtitle. Tap to choose a radar."
         }) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.Center) {
@@ -209,32 +238,15 @@ private fun SiteChip(s: MapUiState, onSelect: (RadarSite) -> Unit, onAuto: () ->
                 )
             }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(if (s.autoSite) "Nearest radar automatically (on)" else "Nearest radar automatically", style = Hookline.type.control) },
-                onClick = { open = false; onAuto() },
-            )
-            s.nearbySites.forEach { (site, km) ->
-                DropdownMenuItem(
-                    text = { Text("${site.label}  ${site.name}  $km km", style = Hookline.type.control) },
-                    onClick = { open = false; onSelect(site) },
-                )
-            }
-        }
     }
 }
 
 @Composable
-private fun WarningBanner(headline: String, detail: String, hazard: Hazard, modifier: Modifier = Modifier) {
+private fun WarningBanner(w: WarningItem, modifier: Modifier = Modifier) {
     val c = Hookline.colors
-    val color = when (hazard) {
-        Hazard.TORNADO_EMERGENCY -> HazardColors.TornadoEmergency
-        Hazard.TORNADO_WARNING -> HazardColors.TornadoWarning
-        Hazard.SEVERE_WARNING -> HazardColors.SevereWarning
-        Hazard.FLASH_FLOOD_WARNING -> HazardColors.FlashFlood
-        Hazard.TORNADO_WATCH -> HazardColors.TornadoWatch
-        else -> HazardColors.SevereWatch
-    }
+    val color = Color(w.argb)
+    val headline = w.event
+    val detail = "Home" + (w.expires?.let { ", until " + MapViewModel.clock(it.toEpochMilli()) } ?: "")
     Row(
         modifier
             .height(Dimens.MinTouch)
@@ -246,8 +258,8 @@ private fun WarningBanner(headline: String, detail: String, hazard: Hazard, modi
     ) {
         HazardSwatch(color)
         Column {
-            Text(headline, style = Hookline.type.control, color = c.ink)
-            Text(detail, style = Hookline.type.caption, color = c.inkSecondary)
+            Text(headline, style = Hookline.type.control, color = c.ink, maxLines = 1)
+            Text(detail, style = Hookline.type.caption, color = c.inkSecondary, maxLines = 1)
         }
     }
 }
@@ -256,6 +268,7 @@ private fun WarningBanner(headline: String, detail: String, hazard: Hazard, modi
 private fun StatusChip(status: FeedStatus, latest: Boolean, mode: Mode) {
     when {
         !latest && status == FeedStatus.Live -> Chip("Looping, not live")
+        mode == Mode.MOSAIC -> Chip("US mosaic, updates every few minutes", dot = true)
         status == FeedStatus.Connecting -> Chip(if (mode == Mode.COMPOSITE) "Loading European radar…" else "Connecting to radar…")
         status == FeedStatus.Live -> Chip(if (mode == Mode.COMPOSITE) "Live composite, every 5 min" else "Live", dot = true)
         status is FeedStatus.Stale -> Chip("Not updating: ${status.message}", strong = true)
@@ -264,7 +277,7 @@ private fun StatusChip(status: FeedStatus, latest: Boolean, mode: Mode) {
 }
 
 @Composable
-private fun Chip(text: String, dot: Boolean = false, strong: Boolean = false) {
+private fun Chip(text: String, dot: Boolean = false, strong: Boolean = false, swatch: Color? = null) {
     val c = Hookline.colors
     Row(
         Modifier.background(c.chrome, CircleShape)
@@ -274,6 +287,7 @@ private fun Chip(text: String, dot: Boolean = false, strong: Boolean = false) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (dot) Box(Modifier.size(7.dp).background(c.ink, CircleShape))
+        swatch?.let { Box(Modifier.size(9.dp).background(it, CircleShape)) }
         Text(text, style = Hookline.type.caption, color = if (strong) c.ink else c.inkSecondary, maxLines = 1)
     }
 }
@@ -352,6 +366,7 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
                 Text(
                     s.loop.loading ?: when {
                         s.mode == Mode.NONE -> ""
+                        s.mode == Mode.MOSAIC -> "Loops: zoom in to a radar"
                         !s.loop.available && s.mode == Mode.COMPOSITE -> "Loop needs at least two composites"
                         !s.loop.available -> "Loops cover the lowest tilt for REF and velocity"
                         s.frameEndMillis != null -> MapViewModel.clock(s.frameEndMillis) + if (s.showingLatest) ", latest" else ""
@@ -372,7 +387,7 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
                 val enabled = p in s.availableProducts
                 SelectPill(
                     p.label,
-                    selected = p == (if (s.mode == Mode.COMPOSITE) Product.REF else s.product),
+                    selected = p == (if (s.mode != Mode.SITE) Product.REF else s.product),
                     onClick = { if (enabled) onProduct(p) },
                     modifier = Modifier.weight(1f).alpha(if (enabled) 1f else 0.35f),
                 )
@@ -430,7 +445,7 @@ private fun LoopTape(loop: LoopUi, onScrub: (Int) -> Unit, modifier: Modifier = 
 @Composable
 private fun Legend(s: MapUiState) {
     val c = Hookline.colors
-    val product = if (s.mode == Mode.COMPOSITE) Product.REF else s.product
+    val product = if (s.mode != Mode.SITE) Product.REF else s.product
     val lut = remember(product) {
         product.palette.toLut(product.min, product.max, 24).filter { (it ushr 24) != 0 }.map { Color(it) }
     }
@@ -456,11 +471,12 @@ private fun Legend(s: MapUiState) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LayersSheet(
-    intensity: MapIntensity,
-    loopLength: Int,
+    s: MapUiState,
     offline: OfflineUi,
     onIntensity: (MapIntensity) -> Unit,
     onLoopLength: (Int) -> Unit,
+    onSatellite: (Boolean) -> Unit,
+    onWarnings: (Boolean) -> Unit,
     onDownload: () -> Unit,
     onDelete: (Long) -> Unit,
     onDismiss: () -> Unit,
@@ -474,10 +490,16 @@ private fun LayersSheet(
             Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            val intensity = s.intensity
+            val loopLength = s.loopLength
+            Text("Layers", style = Hookline.type.title, color = c.ink)
+            ToggleRow("Satellite where there's no radar", "Infrared clouds from GOES, Meteosat and Himawari", s.satellite, onSatellite)
+            ToggleRow("Warnings on the map", "NWS in the US, MeteoAlarm in Europe", s.showWarnings, onWarnings)
+            Spacer(Modifier.height(6.dp))
             Text("Map", style = Hookline.type.title, color = c.ink)
             LabeledSlider("Roads", intensity.roads, sliderColors) { onIntensity(intensity.copy(roads = it)) }
             LabeledSlider("Place names", intensity.labels, sliderColors) { onIntensity(intensity.copy(labels = it)) }
-            LabeledSlider("State and county lines", intensity.borders, sliderColors) { onIntensity(intensity.copy(borders = it)) }
+            LabeledSlider("Borders", intensity.borders, sliderColors) { onIntensity(intensity.copy(borders = it)) }
 
             Spacer(Modifier.height(6.dp))
             Text("Loop", style = Hookline.type.title, color = c.ink)

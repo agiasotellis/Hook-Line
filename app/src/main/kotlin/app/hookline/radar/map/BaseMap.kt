@@ -1,6 +1,7 @@
 package app.hookline.radar.map
 
 import android.content.Context
+import app.hookline.radar.core.data.ImagerySource
 import app.hookline.radar.core.radar.MercatorProjector
 import app.hookline.radar.core.radar.Viewport
 import org.maplibre.android.MapLibre
@@ -19,6 +20,8 @@ import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.sources.RasterSource
+import org.maplibre.android.style.sources.TileSet
 
 /** User-adjustable map layer strengths, 0..1. Never forced on anyone by an update. */
 data class MapIntensity(val roads: Float = 0.7f, val labels: Float = 0.8f, val borders: Float = 0.6f)
@@ -49,6 +52,8 @@ class BaseMap(context: Context) {
     private val borderLayers = mutableListOf<String>()
     private var intensity = MapIntensity()
     private var pendingCamera: Pair<LatLng, Double>? = null
+    private var imagery: List<Pair<ImagerySource, Float>> = emptyList()
+    private val shownImagery = mutableListOf<String>()
 
     init {
         MapLibre.getInstance(context.applicationContext)
@@ -120,10 +125,47 @@ class BaseMap(context: Context) {
         map?.style?.let { applyIntensity(it) }
     }
 
+    /**
+     * Raster imagery (satellite, the US mosaic) with an opacity each, drawn
+     * below roads and names. Sources are replaced when their URL changes.
+     */
+    fun setImagery(list: List<Pair<ImagerySource, Float>>) {
+        if (list == imagery) return
+        imagery = list
+        map?.style?.let { if (it.isFullyLoaded) applyImagery(it) }
+    }
+
+    private fun applyImagery(style: Style) {
+        for (id in shownImagery) {
+            style.removeLayer("img-$id")
+            style.removeSource("img-$id")
+        }
+        shownImagery.clear()
+        // Directly above the (invisible) background, so lines and labels stay on top.
+        val firstVisible = style.layers.firstOrNull { it !is BackgroundLayer }?.id
+        for ((src, opacity) in imagery) {
+            val key = src.id + "-" + src.url.hashCode().toUInt().toString(16)
+            val tiles = TileSet("2.2.0", src.url).apply {
+                minZoom = 0f
+                maxZoom = src.maxZoom.toFloat()
+                setBounds(src.west.toFloat(), src.south.toFloat(), src.east.toFloat(), src.north.toFloat())
+            }
+            style.addSource(RasterSource("img-$key", tiles, 256))
+            val layer = org.maplibre.android.style.layers.RasterLayer("img-$key", "img-$key").withProperties(
+                PropertyFactory.rasterOpacity(opacity),
+                PropertyFactory.rasterFadeDuration(0f),
+            )
+            if (firstVisible != null) style.addLayerBelow(layer, firstVisible) else style.addLayer(layer)
+            shownImagery += key
+        }
+    }
+
     private fun restyle(style: Style) {
         roadLayers.clear(); labelLayers.clear(); borderLayers.clear()
         for (layer in style.layers) restyleLayer(layer)
         applyIntensity(style)
+        shownImagery.clear()
+        applyImagery(style)
     }
 
     private fun restyleLayer(layer: Layer) {

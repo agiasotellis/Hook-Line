@@ -29,6 +29,7 @@ core/radar/          NEXRAD Level II + HDF5/ODIM decoders, projections, palettes
 core/data/           NOAA S3 (NEXRAD), EUMETNET Open Radar Data (Europe), NWS alerts, site catalogue
 tools/sites/         Generator for the site catalogue
 tools/odim-fixtures/ Generator for the synthetic ODIM test files
+tools/meteoalarm/    Packs MeteoAlarm warning-region outlines into the app
 core/designsystem/   Hookline theme tokens and components
 tools/mockup-radar/  Generator for the synthetic supercell imagery used in mockups
 ```
@@ -56,15 +57,24 @@ Working now:
 - **Storm motion**: SRV uses the NWS warning nearest where you're looking (US); storm tracks drawn to +45 min.
 - **GPU renderer**: OpenGL ES 3; radar wedges and composite tiles both drawn from R32F value textures, nearest-sample, palette LUT in the shader.
 - **Inspector**: long-press for the value, a plain-English meaning, beam height and distance (or the column maximum on the composite).
-- **Warnings**: US NWS tornado, severe and flash-flood outlines; Storm Mode notifications for your location in the US.
+- **Warnings**: US NWS tornado, severe and flash-flood outlines; European yellow/orange/red warnings from MeteoAlarm (38 countries, region outlines bundled); a warnings list with full text.
+- **Storm Mode**: background checks for your location in the US (NWS) and Europe (MeteoAlarm, orange and red by default), on/off in the menu.
+- **US mosaic**: zoomed out over North America, NOAA's MRMS mosaic; zoom in for a single radar's raw data.
+- **Satellite**: infrared clouds wherever no radar shares open data (South America, Africa, Asia, Oceania): NASA GIBS for GOES-East/West and Himawari, EUMETSAT Meteosat (hourly) for Africa and the Indian Ocean.
+- **Dual-pol in Germany**: CC and ZDR for the 17 DWD radars from DWD open data (OPERA doesn't exchange dual-pol yet).
+- **Menu**: radar search, warnings, Storm Mode, layers, guide to the products, data sources.
 
-Not yet: European warnings (MeteoAlarm), satellite imagery for regions with no open radar, a US mosaic when zoomed out, dual-pol in Europe (OPERA doesn't exchange it until ~2027).
+Not yet: saved places for Storm Mode, dual-pol for European radars outside Germany, satellite loops.
 
 Test builds: every push to `main` publishes split APKs on the Releases page (`arm64-v8a` for most phones).
 
 ## Data
 - US radar and warning data courtesy of NOAA / National Weather Service, via the NOAA Open Data Dissemination program on AWS and api.weather.gov.
 - European radar data: EUMETNET OPERA and its member national weather services, via the EUMETNET Open Radar Data service (CC BY 4.0).
+- US radar mosaic: NOAA / NWS MRMS via mapservices.weather.noaa.gov.
+- European warnings: MeteoAlarm / EUMETNET and the national weather services (CC BY 4.0).
+- German dual-pol: Source: Deutscher Wetterdienst (CC BY 4.0).
+- Satellite: NASA GIBS / ESDIS (NOAA GOES, JMA Himawari); contains modified EUMETSAT Meteosat data (CC BY 4.0).
 - Base map: OpenFreeMap, OpenMapTiles, © OpenStreetMap contributors.
 
 Hookline is not affiliated with or endorsed by any of these organisations, and it is not an official warning service.

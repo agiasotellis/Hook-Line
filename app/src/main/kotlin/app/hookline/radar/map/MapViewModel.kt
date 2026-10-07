@@ -7,6 +7,15 @@ import androidx.lifecycle.viewModelScope
 import app.hookline.radar.BuildConfig
 import app.hookline.radar.core.data.Alert
 import app.hookline.radar.core.data.Coverage
+import app.hookline.radar.core.data.DwdDualPol
+import app.hookline.radar.core.data.EumetsatLayers
+import app.hookline.radar.core.data.Imagery
+import app.hookline.radar.core.data.ImagerySource
+import app.hookline.radar.core.data.MeteoAlarm
+import app.hookline.radar.core.data.WarningItem
+import app.hookline.radar.core.data.WarningLevel
+import app.hookline.radar.core.data.WarningRegions
+import app.hookline.radar.core.data.toWarningItem
 import app.hookline.radar.core.data.Hazard
 import app.hookline.radar.core.data.LatLon
 import app.hookline.radar.core.data.LiveEvent
@@ -79,8 +88,11 @@ sealed interface FeedStatus {
     data class NoCoverage(val message: String) : FeedStatus
 }
 
-/** What the map is showing. */
-enum class Mode { SITE, COMPOSITE, NONE }
+/**
+ * What the map is showing: one radar's raw data, the European composite,
+ * the US mosaic image (zoomed out in North America), or nothing (satellite only).
+ */
+enum class Mode { SITE, COMPOSITE, MOSAIC, NONE }
 
 /** Storm motion in use for SRV and where it came from. */
 data class MotionInfo(val fromDeg: Int, val speedKt: Int, val source: String)
@@ -117,8 +129,20 @@ data class MapUiState(
     val loop: LoopUi = LoopUi(),
     val motion: MotionInfo = DEFAULT_MOTION,
     val inspector: Inspection? = null,
-    val homeWarning: Alert? = null,
+    val homeWarning: WarningItem? = null,
+    /** Storm Mode switched on and a home place known. */
     val stormModeOn: Boolean = false,
+    val stormModeEnabled: Boolean = true,
+    /** Where Storm Mode watches, e.g. "Attiki, GR"; null until the location is known. */
+    val homeLabel: String? = null,
+    /** Lowest MeteoAlarm level that notifies in Europe. */
+    val euMinLevel: WarningLevel = WarningLevel.ORANGE,
+    /** Active warnings touching the visible map, most severe first. */
+    val warnings: List<WarningItem> = emptyList(),
+    val showWarnings: Boolean = true,
+    val satellite: Boolean = true,
+    /** Raster imagery for the base map (source, opacity). */
+    val imagery: List<Pair<ImagerySource, Float>> = emptyList(),
     val intensity: MapIntensity = MapIntensity(),
     val loopLength: Int = 12,
     val camera: CameraTarget? = null,
@@ -146,6 +170,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val opera = OperaComposite(ordStore)
     private val nws = NwsAlerts(http, BuildConfig.NWS_USER_AGENT)
     private val checker = AlertChecker(app)
+    private val meteoAlarm = MeteoAlarm(http)
+    private val dwd = DwdDualPol(http)
 
     val offline = OfflineMaps(app)
 
@@ -159,7 +185,12 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             // One render origin for the whole session: every layer is placed relative to it.
             origin = MercatorProjector(startCamera.lat, startCamera.lon),
             camera = startCamera,
-            stormModeOn = checker.places().isNotEmpty(),
+            stormModeOn = checker.enabled && checker.places().isNotEmpty(),
+            stormModeEnabled = checker.enabled,
+            homeLabel = checker.homeLabel(),
+            euMinLevel = checker.euMinLevel,
+            showWarnings = prefs.getBoolean("show_warnings", true),
+            satellite = prefs.getBoolean("satellite", true),
         ),
     )
     val state: StateFlow<MapUiState> = _state.asStateFlow()
@@ -190,6 +221,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private var mapZoom = startCamera.zoom
     private var visible: LatLngBounds? = null
     private var alerts: List<Alert> = emptyList()
+    private val euFeeds = HashMap<String, Pair<Long, List<WarningItem>>>() // country -> (fetched at, items)
+    private var regions: WarningRegions? = null
+    private var eumetsat: EumetsatLayers? = null
+
+    // German dual-pol (DWD)
+    private val dualPol = HashMap<Moment, DwdDualPol.Result>()
+    private var dualPolJob: Job? = null
     private var playJob: Job? = null
     private var frameJob: Job? = null
     private var compositeTileJob: Job? = null
@@ -198,11 +236,15 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch { while (isActive) { _state.update { it.copy(nowMillis = System.currentTimeMillis()) }; delay(1_000) } }
         viewModelScope.launch {
+            regions = withContext(Dispatchers.Default) { runCatching { WarningRegions.bundled() }.getOrNull() }
             while (isActive) {
-                if (Coverage.inUs(mapCenter) || checker.places().isNotEmpty()) refreshAlerts()
+                refreshAlerts()
                 delay(60_000)
             }
         }
+        viewModelScope.launch { eumetsat = loadEumetsatLayers(); updateImagery() }
+        // Imagery URLs carry the time: refresh them every 5 minutes.
+        viewModelScope.launch { while (isActive) { delay(300_000); updateImagery() } }
     }
 
     // ---- camera and location ------------------------------------------------------
@@ -222,8 +264,18 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     /** Device location, once permission is granted. Recentres only the first time. */
     fun onLocation(lat: Double, lon: Double) {
         val p = LatLon(lat, lon)
-        checker.setHome(if (Coverage.inUs(p)) p else null)
-        _state.update { it.copy(stormModeOn = checker.places().isNotEmpty()) }
+        viewModelScope.launch {
+            val region = if (Coverage.inUs(p)) null else withContext(Dispatchers.Default) {
+                (regions ?: runCatching { WarningRegions.bundled() }.getOrNull())?.regionAt(p)
+            }
+            when {
+                Coverage.inUs(p) -> checker.setHome(p, null, null)
+                region != null -> checker.setHome(p, region.code, region.name.lowercase().split(' ').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } } + ", " + region.country)
+                else -> checker.setHome(null, null, null)
+            }
+            syncStormMode()
+            refreshAlerts()
+        }
         if (!prefs.getBoolean("located_once", false)) {
             prefs.edit().putBoolean("located_once", true).apply()
             val zoom = if (Sites.nearest(p) != null) 7.0 else 5.5
@@ -240,6 +292,16 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(nearbySites = Sites.byDistance(mapCenter).take(25).map { s -> s to Sites.distanceKm(mapCenter, s.location).roundToInt() }) }
         decideSource()
         if (_state.value.mode == Mode.COMPOSITE) refreshCompositeTile(force = false)
+        updateVisibleWarnings()
+        // New countries in view: fetch their warnings soon rather than at the next minute.
+        regions?.let { r ->
+            bounds?.let { b ->
+                val inView = r.countriesIn(b.latitudeSouth, b.longitudeWest, b.latitudeNorth, b.longitudeEast)
+                if (inView.size <= 6 && inView.any { it in WarningRegions.FEEDS && it !in euFeeds }) {
+                    viewModelScope.launch { refreshAlerts() }
+                }
+            }
+        }
         val before = _state.value.motion
         chooseMotion()
         if (_state.value.motion != before && _state.value.product == Product.SRV) showCurrent()
@@ -268,6 +330,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 if (s.site != null) stopSite()
                 if (s.mode != Mode.COMPOSITE) setMode(Mode.COMPOSITE)
             }
+            Imagery.inMrms(mapCenter) -> {
+                if (s.site != null) stopSite()
+                if (s.mode != Mode.MOSAIC) setMode(Mode.MOSAIC)
+            }
             s.site != null && Sites.distanceKm(mapCenter, s.site.location) < 600 -> Unit // keep the last radar nearby
             else -> {
                 if (s.site != null) stopSite()
@@ -286,21 +352,57 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 compositeLayer = if (mode == Mode.COMPOSITE) it.compositeLayer else null,
                 siteLayer = if (mode == Mode.SITE) it.siteLayer else null,
                 status = when (mode) {
-                    Mode.NONE -> FeedStatus.NoCoverage("No open radar data for this area")
+                    Mode.NONE -> FeedStatus.NoCoverage(
+                        if (it.satellite) "No open radar here. Showing infrared satellite" else "No open radar data for this area",
+                    )
+                    Mode.MOSAIC -> FeedStatus.Live
                     else -> it.status
                 },
+                frameEndMillis = if (mode == Mode.MOSAIC || mode == Mode.NONE) null else it.frameEndMillis,
+                availableProducts = if (mode == Mode.SITE) it.availableProducts else setOf(Product.REF),
                 attribution = attributionFor(mode, it.site),
             )
         }
         if (mode == Mode.COMPOSITE) startComposite() else stopComposite()
         if (mode == Mode.COMPOSITE) refreshLoopUi()
+        if (mode == Mode.MOSAIC || mode == Mode.NONE) _state.update { it.copy(loop = LoopUi(available = false)) }
+        updateImagery()
     }
 
-    private fun attributionFor(mode: Mode, site: RadarSite?): String = when {
-        mode == Mode.COMPOSITE -> "Radar: EUMETNET OPERA (CC BY 4.0)"
-        site?.network == Network.OPERA -> "Radar: EUMETNET OPERA, ${site.name.substringAfterLast(", ")} (CC BY 4.0)"
-        mode == Mode.SITE -> "Radar and warnings: NOAA / NWS"
-        else -> ""
+    /** Satellite where there's no radar; the NWS mosaic in MOSAIC mode. */
+    private fun updateImagery() {
+        val s = _state.value
+        val list = mutableListOf<Pair<ImagerySource, Float>>()
+        if (s.satellite && s.mode == Mode.NONE) list += Imagery.satellites(eumetsat).map { it to 0.75f }
+        if (s.mode == Mode.MOSAIC) list += Imagery.mrms(System.currentTimeMillis() / 300_000) to 0.9f
+        _state.update { it.copy(imagery = list, attribution = attributionFor(it.mode, it.site)) }
+    }
+
+    /** EUMETView layer names, cached for a week. */
+    private suspend fun loadEumetsatLayers(): EumetsatLayers? {
+        val age = System.currentTimeMillis() - prefs.getLong("eum_time", 0)
+        if (age < 7 * 86_400_000L && prefs.contains("eum_zero")) {
+            return EumetsatLayers(prefs.getString("eum_zero", null)?.ifEmpty { null }, prefs.getString("eum_iodc", null)?.ifEmpty { null })
+        }
+        return runCatching { EumetsatLayers.discover(http) }.getOrNull()?.also {
+            prefs.edit().putString("eum_zero", it.zeroDegree.orEmpty()).putString("eum_iodc", it.indianOcean.orEmpty())
+                .putLong("eum_time", System.currentTimeMillis()).apply()
+        }
+    }
+
+    private fun attributionFor(mode: Mode, site: RadarSite?): String {
+        val radar = when {
+            mode == Mode.COMPOSITE -> "Radar: EUMETNET OPERA (CC BY 4.0)"
+            mode == Mode.MOSAIC -> Imagery.MRMS_ATTRIBUTION + ", warnings NOAA / NWS"
+            site?.network == Network.OPERA && DwdDualPol.supports(site.id) ->
+                "Radar: EUMETNET OPERA, ${site.name.substringAfterLast(", ")} (CC BY 4.0); CC/ZDR: Source: Deutscher Wetterdienst"
+            site?.network == Network.OPERA -> "Radar: EUMETNET OPERA, ${site.name.substringAfterLast(", ")} (CC BY 4.0)"
+            mode == Mode.SITE -> "Radar and warnings: NOAA / NWS"
+            _state.value.satellite -> Imagery.GIBS_ATTRIBUTION + "; " + Imagery.eumetsatAttribution(java.time.Year.now().value)
+            else -> ""
+        }
+        val eu = if (euFeeds.isNotEmpty() && mode != Mode.MOSAIC && site?.network != Network.NEXRAD) "Warnings: MeteoAlarm / EUMETNET" else ""
+        return listOf(radar, eu).filter { it.isNotEmpty() }.joinToString(". ")
     }
 
     // ---- user actions ---------------------------------------------------------------
@@ -353,6 +455,51 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(intensity = i) }
     }
 
+    fun setSatellite(on: Boolean) {
+        prefs.edit().putBoolean("satellite", on).apply()
+        _state.update { it.copy(satellite = on) }
+        if (_state.value.mode == Mode.NONE) setMode(Mode.NONE) else updateImagery()
+    }
+
+    fun setShowWarnings(on: Boolean) {
+        prefs.edit().putBoolean("show_warnings", on).apply()
+        _state.update { it.copy(showWarnings = on) }
+        rebuildOverlays()
+    }
+
+    fun setStormMode(on: Boolean) {
+        checker.enabled = on
+        syncStormMode()
+    }
+
+    fun setEuMinLevel(level: WarningLevel) {
+        checker.euMinLevel = level
+        _state.update { it.copy(euMinLevel = level) }
+    }
+
+    private fun syncStormMode() {
+        val on = checker.enabled
+        if (on) app.hookline.radar.stormmode.StormModeWorker.schedule(getApplication())
+        else app.hookline.radar.stormmode.StormModeWorker.cancel(getApplication())
+        _state.update {
+            it.copy(stormModeEnabled = on, stormModeOn = on && checker.places().isNotEmpty(), homeLabel = checker.homeLabel())
+        }
+    }
+
+    /** Fly to a warning's area. */
+    fun showWarning(w: WarningItem) {
+        val b = w.box ?: return
+        val lat = (b[0] + b[2]) / 2; val lon = (b[1] + b[3]) / 2
+        val span = maxOf(b[2] - b[0], (b[3] - b[1]) * 0.6).coerceAtLeast(0.05)
+        val zoom = (Math.log(180.0 / span) / Math.log(2.0) + 0.5).coerceIn(4.0, 10.0)
+        _state.update { it.copy(camera = CameraTarget(lat, lon, zoom, ++cameraSeq)) }
+    }
+
+    /** Fly somewhere (e.g. a search result) without changing the radar choice. */
+    fun flyTo(lat: Double, lon: Double, zoom: Double) {
+        _state.update { it.copy(camera = CameraTarget(lat, lon, zoom, ++cameraSeq)) }
+    }
+
     fun setLoopLength(n: Int) {
         prefs.edit().putInt("loop_length", n).apply()
         _state.update { it.copy(loopLength = n) }
@@ -378,6 +525,27 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 describe(Product.REF, if (v.isInfinite()) null else v, "Highest echo above this spot, from all nearby radars")
             }
             _state.update { it.copy(inspector = inspection) }
+        } else if (s.mode == Mode.MOSAIC) {
+            _state.update {
+                it.copy(
+                    inspector = Inspection(
+                        "Zoom in for values",
+                        "Zoomed out, you see NOAA's national mosaic picture. Zoom in and Hookline switches to the nearest radar's own data.",
+                        "US radar mosaic",
+                    ),
+                )
+            }
+        } else {
+            _state.update {
+                it.copy(
+                    inspector = Inspection(
+                        "No radar here",
+                        if (it.satellite) "No open radar covers this spot. The grey and white shapes are clouds seen in infrared by satellite: the whiter, the colder and higher the cloud tops."
+                        else "No open radar covers this spot.",
+                        "Satellite infrared",
+                    ),
+                )
+            }
         }
     }
 
@@ -388,7 +556,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     // ---- single-site radar ------------------------------------------------------------------
 
     private fun stopSite() {
-        streamJob?.cancel(); backfillJob?.cancel()
+        streamJob?.cancel(); backfillJob?.cancel(); dualPolJob?.cancel()
+        dualPol.clear()
         snapshot = null
         currentTexture = null
         refLoop.clear(); velLoop.clear()
@@ -397,7 +566,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startSite(site: RadarSite) {
         stopLoop()
-        streamJob?.cancel(); backfillJob?.cancel()
+        streamJob?.cancel(); backfillJob?.cancel(); dualPolJob?.cancel()
+        dualPol.clear()
         snapshot = null
         currentTexture = null
         refLoop.clear(); velLoop.clear()
@@ -411,6 +581,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         rebuildOverlays()
+        if (DwdDualPol.supports(site.id)) startDualPol(site)
         streamJob = viewModelScope.launch {
             val events = if (site.network == Network.OPERA) ord.stream(site, wantedTilts) else live.stream(site.id)
             events.collect { e ->
@@ -442,6 +613,37 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (first) startBackfill(site, e.volume)
         if (_state.value.showingLatest) showCurrent()
     }
+
+    /**
+     * CC and ZDR for German radars from DWD: fetched once on opening the
+     * radar, then every 5 minutes while one of them is on screen.
+     */
+    private fun startDualPol(site: RadarSite) {
+        dualPolJob = viewModelScope.launch {
+            var first = true
+            while (isActive) {
+                val p = _state.value.product
+                if (first || p == Product.CC || p == Product.ZDR) {
+                    for (m in listOf(Moment.CORRELATION_COEFFICIENT, Moment.DIFFERENTIAL_REFLECTIVITY)) {
+                        try {
+                            dwd.latest(site.id, m)?.let { dualPol[m] = it }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            // Dual-pol is extra; keep the last one.
+                        }
+                    }
+                    first = false
+                    if (_state.value.showingLatest) showCurrent()
+                }
+                delay(300_000)
+            }
+        }
+    }
+
+    /** DWD dual-pol sweep for the lowest tilt, used when OPERA has no CC/ZDR. */
+    private fun dualPolSweep(tilt: Float, moment: Moment): app.hookline.radar.core.radar.Sweep? =
+        if (tilt == snapshot?.tilts?.firstOrNull()) dualPol[moment]?.sweep else null
 
     /** Loops use the lowest tilt (0.5 deg for NEXRAD; it varies in Europe). */
     private fun loopTilt(): Float = snapshot?.tilts?.firstOrNull() ?: LoopBackfill.LOOP_TILT
@@ -674,12 +876,12 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val snap = snapshot ?: return
-        val available = Product.entries.filter { snap.sweep(s.tilt, it.moment) != null }.toSet()
+        val available = Product.entries.filter { snap.sweep(s.tilt, it.moment) != null || dualPolSweep(s.tilt, it.moment) != null }.toSet()
         val product = if (s.product in available || available.isEmpty()) s.product else Product.REF
         if (product != s.product || available != s.availableProducts) {
             _state.update { it.copy(product = product, availableProducts = available.ifEmpty { setOf(Product.REF) }) }
         }
-        val sweep = snap.sweep(s.tilt, product.moment) ?: return // tilt still downloading
+        val sweep = snap.sweep(s.tilt, product.moment) ?: dualPolSweep(s.tilt, product.moment) ?: return // tilt still downloading
         val motion = s.motion
         render(product, s.origin, loc) {
             val srv: ((Radial, MomentData) -> MomentData)? = if (product == Product.SRV) {
@@ -707,14 +909,64 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     // ---- warnings, storm motion, tracks, rings ------------------------------------------------------
 
     private suspend fun refreshAlerts() {
-        alerts = runCatching {
-            nws.activeEvents(listOf("Tornado Warning", "Severe Thunderstorm Warning", "Flash Flood Warning"))
-        }.getOrElse { return }
         val home = checker.places().firstOrNull()?.second
-        _state.update { s -> s.copy(homeWarning = home?.let { h -> alerts.firstOrNull { it.covers(h) } }) }
+        val homeCode = checker.homeRegion()
+        if (Coverage.inUs(mapCenter) || (home != null && Coverage.inUs(home))) {
+            runCatching {
+                nws.activeEvents(listOf("Tornado Warning", "Severe Thunderstorm Warning", "Flash Flood Warning"))
+            }.onSuccess { alerts = it }
+        } else {
+            alerts = emptyList()
+        }
+        refreshEuWarnings(homeCode)
+        val now = Instant.now()
+        val eu = euFeeds.values.flatMap { it.second }.filter { it.isActive(now) }
+        val homeWarning = home?.let { h ->
+            alerts.firstOrNull { it.covers(h) }?.toWarningItem()
+                ?: eu.filter { w -> homeCode != null && homeCode in w.codes }.maxByOrNull { it.level.ordinal }
+        }
+        _state.update { s -> s.copy(homeWarning = homeWarning) }
+        updateVisibleWarnings()
         chooseMotion()
         rebuildOverlays()
         if (_state.value.product == Product.SRV) showCurrent()
+    }
+
+    /** MeteoAlarm feeds for the countries in view (and home), each refreshed at most every 10 minutes. */
+    private suspend fun refreshEuWarnings(homeCode: String?) {
+        val r = regions ?: return
+        val b = visible
+        val wanted = LinkedHashSet<String>()
+        homeCode?.let { wanted += WarningRegions.countryOf(it) }
+        if (b != null) {
+            val inView = withContext(Dispatchers.Default) {
+                r.countriesIn(b.latitudeSouth, b.longitudeWest, b.latitudeNorth, b.longitudeEast)
+            }
+            if (inView.size <= 6) wanted += inView
+            else r.regionAt(mapCenter)?.let { wanted += it.country }
+        }
+        val now = System.currentTimeMillis()
+        for (c in wanted) {
+            if (c !in WarningRegions.FEEDS) continue
+            val cached = euFeeds[c]
+            if (cached != null && now - cached.first < 600_000) continue
+            runCatching { meteoAlarm.warnings(c) }.onSuccess { euFeeds[c] = now to it }
+        }
+        // Forget countries far from view after an hour.
+        euFeeds.entries.removeIf { (c, v) -> c !in wanted && now - v.first > 3_600_000 }
+    }
+
+    private fun updateVisibleWarnings() {
+        val b = visible
+        val now = Instant.now()
+        val all = alerts.map { it.toWarningItem() } + euFeeds.values.flatMap { it.second }.filter { it.isActive(now) }
+        val shown = if (b == null) all else all.filter { it.intersects(b.latitudeSouth, b.longitudeWest, b.latitudeNorth, b.longitudeEast) }
+        _state.update {
+            it.copy(
+                warnings = shown.sortedWith(compareByDescending<WarningItem> { w -> w.level.ordinal }.thenBy { w -> w.onset }),
+                attribution = attributionFor(it.mode, it.site),
+            )
+        }
     }
 
     /**
@@ -754,7 +1006,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+        if (_state.value.showWarnings) list += euOutlines(o)
         for (a in alerts) {
+            if (!_state.value.showWarnings) break
             val (argb, width) = when (a.hazard) {
                 Hazard.TORNADO_EMERGENCY -> 0xFFB000B0.toInt() to 4f
                 Hazard.TORNADO_WARNING -> 0xFFE0245E.toInt() to 3.5f
@@ -773,6 +1027,31 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             a.motion?.let { list += stormTrack(it, o) }
         }
         _state.update { it.copy(outlines = list) }
+    }
+
+    /** One outline per MeteoAlarm region, in the colour of its highest active level. */
+    private fun euOutlines(o: MercatorProjector): List<Outline> {
+        val r = regions ?: return emptyList()
+        val now = Instant.now()
+        val levels = HashMap<String, WarningLevel>()
+        for (w in euFeeds.values.flatMap { it.second }) {
+            if (!w.isActive(now)) continue
+            for (code in w.codes) if ((levels[code]?.ordinal ?: -1) < w.level.ordinal) levels[code] = w.level
+        }
+        val out = mutableListOf<Outline>()
+        for ((code, level) in levels.entries.sortedBy { it.value.ordinal }) {
+            val region = r.regions[code] ?: continue
+            for (ring in region.polygons) {
+                if (ring.size < 3) continue
+                val pts = FloatArray(ring.size * 2)
+                ring.forEachIndexed { i, ll ->
+                    val (x, y) = o.fromLatLon(ll.lat, ll.lon)
+                    pts[i * 2] = x.toFloat(); pts[i * 2 + 1] = y.toFloat()
+                }
+                out += Outline(pts, (level.argb and 0x00FFFFFF) or (0xD9 shl 24), if (level == WarningLevel.RED) 3f else 2f)
+            }
+        }
+        return out
     }
 
     /** Projected path: a line to +45 min with marks at 15, 30 and 45 minutes. */
