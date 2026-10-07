@@ -81,6 +81,9 @@ import java.util.TreeMap
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import app.hookline.radar.i18n.tr
+import app.hookline.radar.i18n.trackLabel
+import app.hookline.radar.i18n.midSentence
 
 enum class Product(val label: String, val moment: Moment, val palette: Palette, val min: Float, val max: Float) {
     REF("REF", Moment.REFLECTIVITY, Palette.NWS_REFLECTIVITY, -10f, 80f),
@@ -187,7 +190,7 @@ data class MapUiState(
     val product2: Product get() = if (product == Product.REF) Product.VEL else Product.REF
 
     companion object {
-        val DEFAULT_MOTION = MotionInfo(240, 30, "Default motion")
+        val DEFAULT_MOTION = MotionInfo(240, 30, tr("Default motion"))
     }
 }
 
@@ -443,7 +446,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 siteLayer = if (mode == Mode.SITE) it.siteLayer else null,
                 status = when (mode) {
                     Mode.NONE -> FeedStatus.NoCoverage(
-                        if (it.satellite) "No open radar here. Showing infrared satellite" else "No open radar data for this area",
+                        if (it.satellite) tr("No open radar here. Showing infrared satellite") else tr("No open radar data for this area"),
                     )
                     Mode.MOSAIC -> FeedStatus.Live
                     else -> it.status
@@ -702,15 +705,15 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                         glmKnown += keys
                         while (glmKnown.size > 200) glmKnown.remove(glmKnown.first())
                         flashes = (flashes + fresh).filter { now - it.timeMillis < LIGHTNING_WINDOW }.takeLast(4_000)
-                        _state.update { it.copy(lightningInfo = "${flashes.size} flashes in the last 15 min (GOES ${if (b.endsWith("18")) "West" else "East"})") }
+                        _state.update { it.copy(lightningInfo = if (b.endsWith("18")) tr("%s flashes in the last 15 min (GOES West)", flashes.size) else tr("%s flashes in the last 15 min (GOES East)", flashes.size)) }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        _state.update { it.copy(lightningInfo = "Lightning not updating: ${e.message}") }
+                        _state.update { it.copy(lightningInfo = tr("Lightning not updating: %s", e.message)) }
                     }
                 } else {
                     _state.update {
-                        it.copy(lightningInfo = if (Coverage.inOperaComposite(mapCenter) || mapCenter.lon in -20.0..60.0) "Lightning from Meteosat (may lag a few minutes)" else "No lightning data here")
+                        it.copy(lightningInfo = if (Coverage.inOperaComposite(mapCenter) || mapCenter.lon in -20.0..60.0) tr("Lightning from Meteosat (may lag a few minutes)") else tr("No lightning data here"))
                     }
                 }
                 rebuildOverlays()
@@ -800,7 +803,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     fun inspect(at: LatLng) {
         inspectBase(at)
         overlayText(at.latitude, at.longitude)?.let { extra ->
-            _state.update { st -> st.copy(inspector = st.inspector?.let { it.copy(meaning = it.meaning + "\n" + extra) } ?: Inspection("Swath", extra, "")) }
+            _state.update { st -> st.copy(inspector = st.inspector?.let { it.copy(meaning = it.meaning + "\n" + extra) } ?: Inspection(tr("Swath"), extra, "")) }
         }
     }
 
@@ -812,26 +815,25 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             val (brg, dist) = MercatorProjector.bearingDistance(loc.lat, loc.lon, at.latitude, at.longitude)
             val v = tex.valueAtPolar(brg, dist)
             val u = s.units
-            val height = Fmt.height(RadialGeometry.beamHeightMeters(dist, tex.elevationDeg.toDouble()), u) +
-                " above the radar, " + Fmt.distance(dist, u) + " out"
+            val height = tr("%s above the radar, %s out", Fmt.height(RadialGeometry.beamHeightMeters(dist, tex.elevationDeg.toDouble()), u), Fmt.distance(dist, u))
             _state.update { it.copy(inspector = describe(it.product, v, height)) }
         } else if (s.mode == Mode.COMPOSITE) {
             val g = compositeGrid ?: return
             val loc = compositeLocator ?: return
             val v = CompositeTile.valueAt(g, loc, at.latitude, at.longitude)
             val inspection = if (v.isNaN()) {
-                Inspection("No data", "This spot isn't covered by the European radar network.", "Europe composite")
+                Inspection(tr("No data"), tr("This spot isn't covered by the European radar network."), tr("Europe composite"))
             } else {
-                describe(Product.REF, if (v.isInfinite()) null else v, "Highest echo above this spot, from all nearby radars")
+                describe(Product.REF, if (v.isInfinite()) null else v, tr("Highest echo above this spot, from all nearby radars"))
             }
             _state.update { it.copy(inspector = inspection) }
         } else if (s.mode == Mode.MOSAIC) {
             _state.update {
                 it.copy(
                     inspector = Inspection(
-                        "Zoom in for values",
-                        "Zoomed out, you see NOAA's national mosaic picture. Zoom in and Hookline switches to the nearest radar's own data.",
-                        "US radar mosaic",
+                        tr("Zoom in for values"),
+                        tr("Zoomed out, you see NOAA's national mosaic picture. Zoom in and Hookline switches to the nearest radar's own data."),
+                        tr("US radar mosaic"),
                     ),
                 )
             }
@@ -839,10 +841,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             _state.update {
                 it.copy(
                     inspector = Inspection(
-                        "No radar here",
-                        if (it.satellite) "No open radar covers this spot. The grey and white shapes are clouds seen in infrared by satellite: the whiter, the colder and higher the cloud tops."
-                        else "No open radar covers this spot.",
-                        "Satellite infrared",
+                        tr("No radar here"),
+                        if (it.satellite) tr("No open radar covers this spot. The grey and white shapes are clouds seen in infrared by satellite: the whiter, the colder and higher the cloud tops.")
+                        else tr("No open radar covers this spot."),
+                        tr("Satellite infrared"),
                     ),
                 )
             }
@@ -850,7 +852,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun downloadVisibleMap(bounds: LatLngBounds, pixelRatio: Float) {
-        offline.download(bounds, _state.value.site?.name?.let { "$it area" } ?: "Saved area", pixelRatio)
+        offline.download(bounds, _state.value.site?.name?.let { tr("%s area", it) } ?: tr("Saved area"), pixelRatio)
     }
 
     // ---- single-site radar ------------------------------------------------------------------
@@ -957,13 +959,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (wanted <= 1) return
         backfillJob = viewModelScope.launch {
             var got = 0
-            setLoopLoading("Loading loop…")
+            setLoopLoading(tr("Loading loop…"))
             try {
                 val frames = if (site.network == Network.OPERA) ord.loopFrames(site, wanted - 1) else backfill.frames(site.id, volume, wanted - 1)
                 frames.collect { f ->
                     got++
                     addToLoop(f.reflectivity, f.velocity)
-                    setLoopLoading("Loading loop $got/${wanted - 1}")
+                    setLoopLoading(tr("Loading loop %s/%s", got, wanted - 1))
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -1003,7 +1005,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     val keys = opera.latestKeys(_state.value.loopLength.coerceIn(2, 12))
                     val newest = keys.firstOrNull()
                     if (newest == null) {
-                        if (compositeGrid == null) _state.update { it.copy(status = FeedStatus.Stale("No recent European composite")) }
+                        if (compositeGrid == null) _state.update { it.copy(status = FeedStatus.Stale(tr("No recent European composite"))) }
                     } else if (newest.key != compositeKey?.key) {
                         val bytes = opera.fetchBytes(newest)
                         val grid = withContext(Dispatchers.Default) { OperaComposite.decode(bytes) }
@@ -1024,7 +1026,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     throw e
                 } catch (e: Exception) {
                     attempt++
-                    _state.update { it.copy(status = FeedStatus.Stale(e.message ?: "Can't reach European radar data")) }
+                    _state.update { it.copy(status = FeedStatus.Stale(e.message ?: tr("Can't reach European radar data"))) }
                 }
                 delay(if (attempt == 0) 120_000L else (15_000L * attempt).coerceAtMost(120_000L))
             }
@@ -1083,7 +1085,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (keys.size < 2) return false
         val layers = HashMap<Long, RasterLayer>()
         for ((i, k) in keys.withIndex()) {
-            setLoopLoading("Loading loop ${i + 1}/${keys.size}")
+            setLoopLoading(tr("Loading loop %s/%s", i + 1, keys.size))
             val bytes = compositeBytes[k.timeMillis] ?: opera.fetchBytes(k).also { compositeBytes[k.timeMillis] = it }
             val layer = withContext(Dispatchers.Default) {
                 val g = OperaComposite.decode(bytes)
@@ -1329,7 +1331,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     fun setTrackOverlay(p: MrmsTracks.Product?) {
         prefs.edit().putString("track_overlay", p?.name).apply()
         overlayJob?.cancel(); overlayJob = null; overlaySwath = null
-        _state.update { it.copy(trackOverlay = p, overlayLayer = null, overlayInfo = if (p == null) null else "Loading ${p.label.lowercase()}…") }
+        _state.update { it.copy(trackOverlay = p, overlayLayer = null, overlayInfo = if (p == null) null else tr("Loading %s…", midSentence(trackLabel(p)))) }
         p?.let { startTracks(it) }
     }
 
@@ -1341,11 +1343,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     val origin = _state.value.origin
                     val layer = withContext(Dispatchers.Default) { swathLayer(sw, origin, p) }
                     overlaySwath = sw
-                    _state.update { it.copy(overlayLayer = layer, overlayInfo = "${p.label}, until ${clock(sw.timeMillis)}") }
+                    _state.update { it.copy(overlayLayer = layer, overlayInfo = tr("%s, until %s", trackLabel(p), clock(sw.timeMillis))) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    _state.update { it.copy(overlayInfo = "${p.label} not available: ${e.message}") }
+                    _state.update { it.copy(overlayInfo = tr("%s not available: %s", trackLabel(p), e.message)) }
                 }
                 delay(p.refreshMs)
             }
@@ -1384,9 +1386,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         return when (p) {
             MrmsTracks.Product.HAIL_24H -> {
                 val size = if (_state.value.units == app.hookline.radar.core.data.UnitSystem.IMPERIAL) "%.1f in".format(Locale.US, v / 25.4) else "%.1f cm".format(Locale.US, v / 10)
-                "Radar-estimated hail up to $size here in the last 24 hours."
+                tr("Radar-estimated hail up to %s here in the last 24 hours.", size)
             }
-            MrmsTracks.Product.ROTATION_60M -> "Rotation of %.3f /s detected here in the last hour%s.".format(Locale.US, v, if (v >= 0.01) " (strong)" else "")
+            MrmsTracks.Product.ROTATION_60M -> if (v >= 0.01) tr("Rotation of %s /s detected here in the last hour (strong).", "%.3f".format(Locale.US, v))
+                else tr("Rotation of %s /s detected here in the last hour.", "%.3f".format(Locale.US, v))
         }
     }
 
@@ -1398,14 +1401,14 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val m = s.measure ?: return
         val a = m.a ?: return; val b = m.b ?: return
         if (s.mode != Mode.SITE) {
-            _state.update { it.copy(crossSectionNote = "Cross-sections need a single radar: zoom in near one.") }
+            _state.update { it.copy(crossSectionNote = tr("Cross-sections need a single radar: zoom in near one.")) }
             return
         }
         val snap = snapshot ?: return
         val radar = siteLocation ?: return
         // European radars load tilts on demand: ask for all of them.
         if (s.site?.network == Network.OPERA) wantedTilts.value = snap.tilts.toSet()
-        _state.update { it.copy(crossSectionNote = "Building cross-section…") }
+        _state.update { it.copy(crossSectionNote = tr("Building cross-section…")) }
         viewModelScope.launch {
             val cs = withContext(Dispatchers.Default) {
                 val textures = snap.tilts.mapNotNull { t -> snap.sweep(t, Moment.REFLECTIVITY)?.let { SweepTexture.from(it, Moment.REFLECTIVITY, null) } }
@@ -1445,7 +1448,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             _state.update {
                 it.copy(
                     crossSection = cs,
-                    crossSectionNote = if (cs == null) "No reflectivity volume yet." else if (cs.tilts < 4) "Only ${cs.tilts} tilts loaded so far; more appear as they download." else null,
+                    crossSectionNote = if (cs == null) tr("No reflectivity volume yet.") else if (cs.tilts < 4) tr("Only %s tilts loaded so far; more appear as they download.", cs.tilts) else null,
                 )
             }
         }
@@ -1474,17 +1477,17 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     fun archiveSetDate(date: LocalDate) {
         val a = _state.value.archive ?: return
         archiveJob?.cancel()
-        _state.update { it.copy(archive = a.copy(date = date, keys = emptyList(), index = null, loading = "Listing scans…", error = null)) }
+        _state.update { it.copy(archive = a.copy(date = date, keys = emptyList(), index = null, loading = tr("Listing scans…"), error = null)) }
         archiveJob = viewModelScope.launch {
             try {
                 val keys = nexrad.archiveKeys(a.site.id, date)
                     .filter { k -> val n = k.substringAfterLast('/'); n.startsWith(a.site.id) && !n.contains("_MDM") }
                     .sorted()
-                _state.update { it.copy(archive = it.archive?.copy(keys = keys, loading = null, error = if (keys.isEmpty()) "No scans stored for this day." else null)) }
+                _state.update { it.copy(archive = it.archive?.copy(keys = keys, loading = null, error = if (keys.isEmpty()) tr("No scans stored for this day.") else null)) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(archive = it.archive?.copy(loading = null, error = "Couldn't list the archive: ${e.message}")) }
+                _state.update { it.copy(archive = it.archive?.copy(loading = null, error = tr("Couldn't list the archive: %s", e.message))) }
             }
         }
     }
@@ -1496,7 +1499,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         archiveJob?.cancel()
         stopLoop()
         streamJob?.cancel(); backfillJob?.cancel(); dualPolJob?.cancel()
-        _state.update { it.copy(archive = a.copy(index = index, loading = "Downloading ${a.label(index)} UTC…", error = null)) }
+        _state.update { it.copy(archive = a.copy(index = index, loading = tr("Downloading %s UTC…", a.label(index)), error = null)) }
         archiveJob = viewModelScope.launch {
             try {
                 val raw = nexrad.fetchArchive(key)
@@ -1508,7 +1511,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     asm.accept(1, app.hookline.radar.core.radar.Level2Decoder.decodeRadials(bytes))
                     asm.snapshot()
                 }
-                if (snap.sweeps.isEmpty()) throw java.io.IOException("This scan uses an older format Hookline can't read (before 2008).")
+                if (snap.sweeps.isEmpty()) throw java.io.IOException(tr("This scan uses an older format Hookline can't read (before 2008)."))
                 snapshot = snap
                 currentTexture = null
                 refLoop.clear(); velLoop.clear()
@@ -1530,7 +1533,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(archive = it.archive?.copy(loading = null, error = e.message ?: "Couldn't load this scan")) }
+                _state.update { it.copy(archive = it.archive?.copy(loading = null, error = e.message ?: tr("Couldn't load this scan"))) }
             }
         }
     }
@@ -1642,7 +1645,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             .filter { it.third.first < 230_000 }
             .minByOrNull { it.third.second }
         _state.update {
-            it.copy(motion = best?.let { (a, m, _) -> MotionInfo(m.fromDeg, m.speedKt, "From the ${a.event.lowercase()}") } ?: MapUiState.DEFAULT_MOTION)
+            it.copy(motion = best?.let { (a, m, _) -> MotionInfo(m.fromDeg, m.speedKt, tr("From the %s", a.event.lowercase())) } ?: MapUiState.DEFAULT_MOTION)
         }
     }
 
@@ -1743,46 +1746,46 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     // ---- inspector wording -----------------------------------------------------------------------------
 
     private fun describe(p: Product, v: Float?, height: String): Inspection {
-        if (v == null) return Inspection("No echo", "Nothing above the radar's detection threshold here.", height)
+        if (v == null) return Inspection(tr("No echo"), tr("Nothing above the radar's detection threshold here."), height)
         if (v == Gate.RANGE_FOLDED) return Inspection(
-            "Range folded", "The radar can't tell how far away this echo is. Try another tilt.", height,
+            tr("Range folded"), tr("The radar can't tell how far away this echo is. Try another tilt."), height,
         )
         return when (p) {
             Product.REF -> Inspection(
                 "${v.roundToInt()} dBZ",
                 when {
-                    v < 20 -> "Light rain, drizzle or snow."
-                    v < 40 -> "Moderate rain."
-                    v < 50 -> "Heavy rain."
-                    v < 60 -> "Very heavy rain; hail possible."
-                    else -> "Hail likely."
+                    v < 20 -> tr("Light rain, drizzle or snow.")
+                    v < 40 -> tr("Moderate rain.")
+                    v < 50 -> tr("Heavy rain.")
+                    v < 60 -> tr("Very heavy rain; hail possible.")
+                    else -> tr("Hail likely.")
                 },
                 height,
             )
             Product.VEL, Product.SRV -> {
-                val dir = if (v < 0) "toward the radar" else "away from the radar"
+                val dir = if (v < 0) tr("toward the radar") else tr("away from the radar")
                 Inspection(
                     Fmt.speed(abs(v).toDouble(), _state.value.units) + " " + dir,
-                    if (abs(v) >= 25.7f) "Strong wind. Look for an opposite colour right next to it: that pair means rotation." else "Wind moving $dir.",
+                    if (abs(v) >= 25.7f) tr("Strong wind. Look for an opposite colour right next to it: that pair means rotation.") else tr("Wind moving %s.", dir),
                     height,
                 )
             }
             Product.CC -> Inspection(
                 "%.2f".format(Locale.US, v),
                 when {
-                    v < 0.8f -> "Non-rain targets: debris, large hail, birds or insects. A round drop inside a hook is a debris signature."
-                    v < 0.95f -> "Mixed precipitation or hail."
-                    else -> "Uniform rain or snow."
+                    v < 0.8f -> tr("Non-rain targets: debris, large hail, birds or insects. A round drop inside a hook is a debris signature.")
+                    v < 0.95f -> tr("Mixed precipitation or hail.")
+                    else -> tr("Uniform rain or snow.")
                 },
                 height,
             )
             Product.ZDR -> Inspection(
                 "%.1f dB".format(Locale.US, v),
                 when {
-                    v > 2.5f -> "Large, flattened raindrops."
-                    v > 0.5f -> "Rain."
-                    v > -0.5f -> "Round targets: hail, snow or drizzle."
-                    else -> "Vertically aligned ice crystals."
+                    v > 2.5f -> tr("Large, flattened raindrops.")
+                    v > 0.5f -> tr("Rain.")
+                    v > -0.5f -> tr("Round targets: hail, snow or drizzle.")
+                    else -> tr("Vertically aligned ice crystals.")
                 },
                 height,
             )

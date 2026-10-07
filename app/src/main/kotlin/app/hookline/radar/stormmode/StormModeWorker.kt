@@ -8,21 +8,15 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import app.hookline.radar.core.data.Hazard
 import java.util.concurrent.TimeUnit
 
 /** Storm Mode "Watching": a 15-minute background check (the WorkManager minimum). */
 class StormModeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
 
     override suspend fun doWork(): Result = runCatching {
-        val alerts = AlertChecker(applicationContext).check()
-        val autoActivate = applicationContext.getSharedPreferences("storm_mode", Context.MODE_PRIVATE)
-            .getBoolean("auto_active_in_watch", false)
-        if (autoActivate && alerts.any { it.hazard == Hazard.TORNADO_WATCH || it.hazard == Hazard.SEVERE_WATCH }) {
-            // Android 12+ can refuse to start a foreground service from the background;
-            // in that case the warning notification is still delivered by the checker.
-            runCatching { StormModeService.start(applicationContext) }
-        }
+        // After the free trial, Storm Mode needs the one-time unlock.
+        if (!app.hookline.radar.billing.Entitlement.allowed(applicationContext)) return Result.success()
+        AlertChecker(applicationContext).check()
         Result.success()
     }.getOrElse { Result.retry() }
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="channel_warnings">Προειδοποιήσεις για τα μέρη σας</string>
+    <string name="channel_storm_mode">Κατάσταση Λειτουργίας καταιγίδας</string>
+    <string name="disclaimer">Ακολουθείτε τις οδηγίες της NWS και των τοπικών αρχών. Το Hookline δείχνει δεδομένα της NWS και δεν είναι υπηρεσία προειδοποιήσεων.</string>
+    <string name="widget_description">Ραντάρ γύρω από το μέρος σας, βροχή την επόμενη ώρα και προειδοποιήσεις</string>
+    <string name="widget_name">Ραντάρ Hookline</string>
+</resources>

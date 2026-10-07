@@ -13,6 +13,7 @@ import org.maplibre.android.offline.OfflineRegion
 import org.maplibre.android.offline.OfflineRegionError
 import org.maplibre.android.offline.OfflineRegionStatus
 import org.maplibre.android.offline.OfflineTilePyramidRegionDefinition
+import app.hookline.radar.i18n.tr
 
 data class SavedRegion(val id: Long, val name: String, val sizeMb: Double?, val complete: Boolean)
 
@@ -50,7 +51,7 @@ class OfflineMaps(context: Context) {
                 list.forEach { r -> r.getStatus(statusCallback(r)) }
             }
             override fun onError(error: String) {
-                _ui.update { it.copy(message = "Couldn't read saved maps: $error") }
+                _ui.update { it.copy(message = tr("Couldn't read saved maps: %s", error)) }
             }
         })
     }
@@ -75,7 +76,7 @@ class OfflineMaps(context: Context) {
         if (_ui.value.progress != null) return
         val definition = OfflineTilePyramidRegionDefinition(BaseMap.STYLE_URL, bounds, 3.0, 10.0, pixelRatio)
         val metadata = JSONObject().put("name", name).toString().toByteArray()
-        _ui.update { it.copy(progress = 0f, message = "Saving $name…") }
+        _ui.update { it.copy(progress = 0f, message = tr("Saving %s…", name)) }
         manager.createOfflineRegion(definition, metadata, object : OfflineManager.CreateOfflineRegionCallback {
             override fun onCreate(offlineRegion: OfflineRegion) {
                 offlineRegion.setObserver(object : OfflineRegion.OfflineRegionObserver {
@@ -85,24 +86,24 @@ class OfflineMaps(context: Context) {
                         } else 0f
                         if (status.isComplete) {
                             offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE)
-                            _ui.update { it.copy(progress = null, message = "Saved $name for offline use") }
+                            _ui.update { it.copy(progress = null, message = tr("Saved %s for offline use", name)) }
                             refresh()
                         } else {
                             _ui.update { it.copy(progress = p) }
                         }
                     }
                     override fun onError(error: OfflineRegionError) {
-                        _ui.update { it.copy(message = "Download problem: ${error.message}. Retrying.") }
+                        _ui.update { it.copy(message = tr("Download problem: %s. Retrying.", error.message)) }
                     }
                     override fun mapboxTileCountLimitExceeded(limit: Long) {
                         offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE)
-                        _ui.update { it.copy(progress = null, message = "That area is too large. Zoom in and try again.") }
+                        _ui.update { it.copy(progress = null, message = tr("That area is too large. Zoom in and try again.")) }
                     }
                 })
                 offlineRegion.setDownloadState(OfflineRegion.STATE_ACTIVE)
             }
             override fun onError(error: String) {
-                _ui.update { it.copy(progress = null, message = "Couldn't start the download: $error") }
+                _ui.update { it.copy(progress = null, message = tr("Couldn't start the download: %s", error)) }
             }
         })
     }
@@ -112,11 +113,11 @@ class OfflineMaps(context: Context) {
         r.delete(object : OfflineRegion.OfflineRegionDeleteCallback {
             override fun onDelete() { refresh() }
             override fun onError(error: String) {
-                _ui.update { it.copy(message = "Couldn't delete: $error") }
+                _ui.update { it.copy(message = tr("Couldn't delete: %s", error)) }
             }
         })
     }
 
     private fun nameOf(r: OfflineRegion): String =
-        runCatching { JSONObject(String(r.metadata)).getString("name") }.getOrDefault("Saved area")
+        runCatching { JSONObject(String(r.metadata)).getString("name") }.getOrDefault(tr("Saved area"))
 }

@@ -60,6 +60,9 @@ import app.hookline.radar.render.RadarGlView
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import app.hookline.radar.i18n.tr
+import app.hookline.radar.i18n.compass
+import app.hookline.radar.i18n.hailLabel
 
 // ---- storm cells ----------------------------------------------------------------------------------
 
@@ -68,14 +71,14 @@ fun CellsSheet(s: MapUiState, onShow: (StormCell) -> Unit, onDismiss: () -> Unit
     val c = Hookline.colors
     val ref = s.me ?: s.places.firstOrNull()?.let { LatLon(it.lat, it.lon) }
     HooklineSheet(onDismiss) {
-        Text("Storms", style = Hookline.type.title, color = c.ink)
+        Text(tr("Storms"), style = Hookline.type.title, color = c.ink)
         Text(
-            "Cells of 40 dBZ and stronger, followed from scan to scan. Rings show where they are; lines show where they'll be in 15 and 30 minutes if they keep moving the same way." +
-                if (ref == null) "" else " Distances are from your location.",
+            tr("Cells of 40 dBZ and stronger, followed from scan to scan. Rings show where they are; lines show where they'll be in 15 and 30 minutes if they keep moving the same way.") +
+                if (ref == null) "" else " " + tr("Distances are from your location."),
             style = Hookline.type.caption, color = c.inkSecondary,
         )
         if (s.cells.isEmpty()) {
-            Text("No strong storms in view right now.", style = Hookline.type.body, color = c.ink, modifier = Modifier.padding(vertical = 16.dp))
+            Text(tr("No strong storms in view right now."), style = Hookline.type.body, color = c.ink, modifier = Modifier.padding(vertical = 16.dp))
         }
         s.cells.forEach { cell ->
             Column(
@@ -86,20 +89,20 @@ fun CellsSheet(s: MapUiState, onShow: (StormCell) -> Unit, onDismiss: () -> Unit
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(10.dp).background(Color(cellColor(cell)), CircleShape))
-                    Text("Storm ${cell.id}", style = Hookline.type.control, color = c.ink, modifier = Modifier.weight(1f))
+                    Text(tr("Storm %s", cell.id), style = Hookline.type.control, color = c.ink, modifier = Modifier.weight(1f))
                     Text("${cell.maxDbz.toInt()} dBZ", style = Hookline.type.control, color = c.ink)
                 }
-                if (cell.hail != HailRisk.NONE) Text(cell.hail.label, style = Hookline.type.body, color = c.ink)
+                if (cell.hail != HailRisk.NONE) Text(hailLabel(cell.hail), style = Hookline.type.body, color = c.ink)
                 val moving = cell.speedMs?.let { sp ->
-                    "Moving ${Fmt.bearing(cell.headingDeg ?: 0.0).substringAfter(' ')} at ${Fmt.speed(sp, s.units)}"
-                } ?: "Motion after the next scan"
+                    tr("Moving %s at %s", compass(Fmt.bearing(cell.headingDeg ?: 0.0).substringAfter(' ')), Fmt.speed(sp, s.units))
+                } ?: tr("Motion after the next scan")
                 Text(moving, style = Hookline.type.caption, color = c.inkSecondary)
                 ref?.let { p ->
                     val (brg, dist) = MercatorProjector.bearingDistance(p.lat, p.lon, cell.lat, cell.lon)
                     val eta = StormCells.arrivalMinutes(cell, p)
                     Text(
-                        Fmt.distance(dist, s.units) + " " + Fmt.bearing(brg).substringAfter(' ') + " of you" +
-                            (eta?.let { " · heading your way, about $it min" } ?: ""),
+                        tr("%s %s of you", Fmt.distance(dist, s.units), compass(Fmt.bearing(brg).substringAfter(' '))) +
+                            (eta?.let { " · " + tr("heading your way, about %s min", it) } ?: ""),
                         style = Hookline.type.caption, color = if (eta != null) c.ink else c.inkSecondary,
                     )
                 }
@@ -131,9 +134,9 @@ fun ArchiveSheet(
     var picking by remember { mutableStateOf(false) }
     var choosingSite by remember { mutableStateOf(false) }
     HooklineSheet(onDismiss) {
-        Text("Archive", style = Hookline.type.title, color = c.ink)
+        Text(tr("Archive"), style = Hookline.type.title, color = c.ink)
         Text(
-            "Every US radar scan since 2008, from NOAA's archive. Times are UTC. Each scan is a 5–10 MB download.",
+            tr("Every US radar scan since 2008, from NOAA's archive. Times are UTC. Each scan is a 5–10 MB download."),
             style = Hookline.type.caption, color = c.inkSecondary,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -183,9 +186,9 @@ fun ArchiveSheet(
                 TextButton(onClick = {
                     picking = false
                     state.selectedDateMillis?.let { onDate(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
-                }) { Text("Show day") }
+                }) { Text(tr("Show day")) }
             },
-            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text(tr("Cancel")) } },
         ) { DatePicker(state = state) }
     }
 }
@@ -213,11 +216,11 @@ fun ArchiveBar(s: MapUiState, onPrev: () -> Unit, onNext: () -> Unit, onPick: ()
     ) {
         Text("‹", style = Hookline.type.title, color = c.ink, modifier = Modifier.clickable(onClick = onPrev).padding(12.dp))
         Column(Modifier.weight(1f).clickable(onClick = onPick), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Archive · ${a.site.label}", style = Hookline.type.caption, color = c.inkSecondary)
+            Text(tr("Archive · %s", a.site.label), style = Hookline.type.caption, color = c.inkSecondary)
             Text(a.loading ?: "${a.date} ${a.label(i)} UTC", style = Hookline.type.control, color = c.ink, maxLines = 1)
         }
         Text("›", style = Hookline.type.title, color = c.ink, modifier = Modifier.clickable(onClick = onNext).padding(12.dp))
-        Text("Live", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onExit).padding(12.dp))
+        Text(tr("Live"), style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onExit).padding(12.dp))
     }
 }
 
@@ -228,9 +231,9 @@ fun CrossSectionSheet(s: MapUiState, onDismiss: () -> Unit) {
     val c = Hookline.colors
     val cs = s.crossSection
     HooklineSheet(onDismiss) {
-        Text("Cross-section", style = Hookline.type.title, color = c.ink)
+        Text(tr("Cross-section"), style = Hookline.type.title, color = c.ink)
         Text(
-            "A vertical slice along your measure line: reflectivity from the ground to 15 km, built from every tilt of the latest volume. Gaps are where no beam passes.",
+            tr("A vertical slice along your measure line: reflectivity from the ground to 15 km, built from every tilt of the latest volume. Gaps are where no beam passes."),
             style = Hookline.type.caption, color = c.inkSecondary,
         )
         s.crossSectionNote?.let { Text(it, style = Hookline.type.body, color = c.ink) }
@@ -238,7 +241,7 @@ fun CrossSectionSheet(s: MapUiState, onDismiss: () -> Unit) {
             val bmp = remember(cs) { crossSectionBitmap(cs) }
             Box(Modifier.fillMaxWidth().aspectRatio(cs.width / cs.height.toFloat()).background(Color(0xFF0B1015))) {
                 Image(
-                    bmp.asImageBitmap(), contentDescription = "Cross-section of reflectivity",
+                    bmp.asImageBitmap(), contentDescription = tr("Cross-section of reflectivity"),
                     modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.None,
                 )
                 // Height lines every 3 km (or 10,000 ft).
@@ -258,7 +261,7 @@ fun CrossSectionSheet(s: MapUiState, onDismiss: () -> Unit) {
                 Text("B", style = Hookline.type.caption, color = c.inkSecondary, modifier = Modifier.weight(1f).padding(start = 4.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
             }
             Text(
-                "Lines every ${if (s.units == UnitSystem.IMPERIAL) "10,000 ft" else "3 km"} above the radar. ${cs.tilts} tilts.",
+                tr("Lines every %s above the radar. %s tilts.", if (s.units == UnitSystem.IMPERIAL) "10,000 ft" else "3 km", cs.tilts),
                 style = Hookline.type.caption, color = c.inkSecondary,
             )
         }

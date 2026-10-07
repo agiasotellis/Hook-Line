@@ -6,20 +6,35 @@ plugins {
 
 android {
     namespace = "app.hookline.radar"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.hookline.radar"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 10
-        versionName = "0.7.0"
+        targetSdk = 36
+        versionCode = 11
+        versionName = "1.0.0"
         // NWS asks every client to identify itself with contact info.
         buildConfigField("String", "NWS_USER_AGENT", "\"HooklineRadar/0.1 (support@hookline.app)\"")
     }
 
+    // Release signing: the upload key comes from CI secrets (see docs/PLAY-RELEASE.md).
+    // Without them, release builds are signed with the debug key so CI can still verify R8.
+    val keystore = System.getenv("HOOKLINE_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (keystore != null) {
+            create("upload") {
+                storeFile = keystore
+                storePassword = System.getenv("HOOKLINE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("HOOKLINE_KEY_ALIAS")
+                keyPassword = System.getenv("HOOKLINE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = if (keystore != null) signingConfigs.getByName("upload") else signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -57,6 +72,7 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
+    implementation(libs.play.billing)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

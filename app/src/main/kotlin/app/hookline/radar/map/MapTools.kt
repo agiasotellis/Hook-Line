@@ -36,6 +36,9 @@ import app.hookline.radar.share.Sharer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import app.hookline.radar.i18n.tr
+import app.hookline.radar.i18n.compass
+import app.hookline.radar.i18n.midSentence
 
 /** A square map control with an icon. */
 @Composable
@@ -106,28 +109,28 @@ fun MeasureCard(s: MapUiState, onClear: () -> Unit, onClose: () -> Unit, onCross
     ) {
         val a = m.a; val b = m.b
         when {
-            a == null -> Text("Tap the start point, for example a storm.", style = Hookline.type.body, color = c.ink)
-            b == null -> Text("Now tap the end point, for example where you are.", style = Hookline.type.body, color = c.ink)
+            a == null -> Text(tr("Tap the start point, for example a storm."), style = Hookline.type.body, color = c.ink)
+            b == null -> Text(tr("Now tap the end point, for example where you are."), style = Hookline.type.body, color = c.ink)
             else -> {
                 val (brg, dist) = MercatorProjector.bearingDistance(a.lat, a.lon, b.lat, b.lon)
                 Text(Fmt.distance(dist, s.units), style = Hookline.type.readoutXL, color = c.ink)
-                Text("Bearing ${Fmt.bearing(brg)}", style = Hookline.type.body, color = c.ink)
+                Text(tr("Bearing %s", compass(Fmt.bearing(brg))), style = Hookline.type.body, color = c.ink)
                 val speed = s.motion.speedKt * 0.514444
                 if (speed > 1) {
                     Text(
-                        "A storm moving at ${Fmt.speed(speed, s.units)} covers this in about ${Fmt.duration(dist / speed)}.",
+                        tr("A storm moving at %s covers this in about %s.", Fmt.speed(speed, s.units), Fmt.duration(dist / speed)),
                         style = Hookline.type.body, color = c.ink,
                     )
-                    Text("Storm speed: ${s.motion.source.lowercase()}", style = Hookline.type.caption, color = c.inkSecondary)
+                    Text(tr("Storm speed: %s", midSentence(s.motion.source)), style = Hookline.type.caption, color = c.inkSecondary)
                 }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             if (m.a != null && m.b != null && s.mode == Mode.SITE) {
-                Text("Cross-section", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onCrossSection).padding(vertical = 8.dp))
+                Text(tr("Cross-section"), style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onCrossSection).padding(vertical = 8.dp))
             }
-            Text("Clear", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onClear).padding(vertical = 8.dp))
-            Text("Done", style = Hookline.type.control, color = c.inkSecondary, modifier = Modifier.clickable(onClick = onClose).padding(vertical = 8.dp))
+            Text(tr("Clear"), style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onClear).padding(vertical = 8.dp))
+            Text(tr("Done"), style = Hookline.type.control, color = c.inkSecondary, modifier = Modifier.clickable(onClick = onClose).padding(vertical = 8.dp))
         }
     }
 }
@@ -142,18 +145,18 @@ class ShareActions(
     private fun title(s: MapUiState, frameMillis: Long?): String {
         val what = when (s.mode) {
             Mode.SITE -> "${if (s.mode == Mode.SITE) s.product.label else "REF"} · ${s.site?.label ?: ""} ${s.site?.name ?: ""}"
-            Mode.COMPOSITE -> "Reflectivity · Europe composite"
-            Mode.MOSAIC -> "Reflectivity · US mosaic"
-            Mode.NONE -> "Satellite"
+            Mode.COMPOSITE -> tr("Reflectivity · Europe composite")
+            Mode.MOSAIC -> tr("Reflectivity · US mosaic")
+            Mode.NONE -> tr("Satellite")
         }
         return what + (frameMillis?.let { " · " + MapViewModel.clock(it) } ?: "")
     }
 
-    private fun credit(s: MapUiState) = listOf(s.attribution, "Map " + BaseMap.ATTRIBUTION).filter { it.isNotEmpty() }.joinToString(". ")
+    private fun credit(s: MapUiState) = listOf(s.attribution, tr("Map %s", BaseMap.ATTRIBUTION)).filter { it.isNotEmpty() }.joinToString(". ")
 
     suspend fun still(progress: (String?) -> Unit) {
         val s = vm.state.value
-        progress("Preparing picture…")
+        progress(tr("Preparing picture…"))
         try {
             val r = radar.capture()
             val map = baseMap.snapshot()
@@ -161,7 +164,7 @@ class ShareActions(
                 val img = Sharer.compose(context, r, map, title(s, s.frameEndMillis), credit(s), 0xFF141B22.toInt())
                 Sharer.write(context, "hookline.png") { img.compress(Bitmap.CompressFormat.PNG, 100, it) }
             }
-            Sharer.share(context, file, "image/png", "Radar from Hookline")
+            Sharer.share(context, file, "image/png", tr("Radar from Hookline"))
         } finally {
             progress(null)
         }
@@ -177,7 +180,7 @@ class ShareActions(
             val frames = mutableListOf<IntArray>()
             var w = 0; var h = 0
             for (i in 0 until n) {
-                progress("Making loop ${i + 1}/$n…")
+                progress(tr("Making loop %s/%s…", i + 1, n))
                 vm.scrubTo(i)
                 delay(450) // let the frame render
                 val st = vm.state.value
@@ -190,12 +193,12 @@ class ShareActions(
                 frames += px
             }
             vm.scrubTo(n) // back to live
-            progress("Encoding…")
+            progress(tr("Encoding…"))
             val file = withContext(Dispatchers.Default) {
                 val delays = List(n) { if (it == n - 1) 150 else 35 }
                 Sharer.write(context, "hookline-loop.gif") { GifEncoder(w, h).encode(frames, delays, it) }
             }
-            Sharer.share(context, file, "image/gif", "Radar loop from Hookline")
+            Sharer.share(context, file, "image/gif", tr("Radar loop from Hookline"))
         } finally {
             progress(null)
         }

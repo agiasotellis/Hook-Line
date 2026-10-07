@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import app.hookline.radar.stormmode.StormModeWorker
+import app.hookline.radar.i18n.tr
 
 class HooklineApp : Application() {
     override fun onCreate() {
@@ -14,7 +15,7 @@ class HooklineApp : Application() {
             NotificationChannel(CHANNEL_WARNINGS, getString(R.string.channel_warnings), NotificationManager.IMPORTANCE_HIGH)
         )
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_RAIN, "Rain starting soon", NotificationManager.IMPORTANCE_DEFAULT)
+            NotificationChannel(CHANNEL_RAIN, tr("Rain starting soon"), NotificationManager.IMPORTANCE_DEFAULT)
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_STORM_MODE, getString(R.string.channel_storm_mode), NotificationManager.IMPORTANCE_LOW)

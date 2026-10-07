@@ -31,6 +31,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
+import app.hookline.radar.i18n.tr
+import app.hookline.radar.i18n.nowcastSummary
 
 /**
  * Shared by the 15-minute worker ("Watching") and the 60-second foreground
@@ -60,13 +62,13 @@ class AlertChecker(private val context: Context) {
     /** The automatic place: where the device was last seen. */
     fun places(): List<Pair<String, LatLon>> {
         if (!prefs.contains("home_lat")) return emptyList()
-        return listOf("Current location" to LatLon(prefs.getFloat("home_lat", 0f).toDouble(), prefs.getFloat("home_lon", 0f).toDouble()))
+        return listOf(tr("Current location") to LatLon(prefs.getFloat("home_lat", 0f).toDouble(), prefs.getFloat("home_lon", 0f).toDouble()))
     }
 
     /** Current location (id 0, if known) plus saved places. */
     fun allPlaces(): List<Place> {
         val cur = places().firstOrNull()?.let { (_, p) ->
-            Place(0, "Current location", p.lat, p.lon, homeRegion(), store.currentWarnings, store.currentRain, store.currentOutlook, store.currentOutlookAt)
+            Place(0, tr("Current location"), p.lat, p.lon, homeRegion(), store.currentWarnings, store.currentRain, store.currentOutlook, store.currentOutlookAt)
         }
         return listOfNotNull(cur) + store.saved()
     }
@@ -76,7 +78,7 @@ class AlertChecker(private val context: Context) {
 
     fun homeLabel(): String? = when {
         !prefs.contains("home_lat") -> null
-        else -> prefs.getString("home_label", null) ?: "Your location"
+        else -> prefs.getString("home_label", null) ?: tr("Your location")
     }
 
     fun setHome(p: LatLon?, regionCode: String?, label: String?) {
@@ -147,7 +149,7 @@ class AlertChecker(private val context: Context) {
         val byKind = wanted.groupBy { rainSource.kindFor(LatLon(it.lat, it.lon)) }
         for ((kind, group) in byKind) {
             if (kind == null) {
-                group.forEach { saveOutlook(it, "No rain radar here") }
+                group.forEach { saveOutlook(it, tr("No rain radar here")) }
                 continue
             }
             try {
@@ -170,7 +172,7 @@ class AlertChecker(private val context: Context) {
                     }
                     if (loadGrid(place.id)?.timeMillis != newestTime) saveGrid(place.id, grid)
                     val result = Nowcast.forecast(grid, prev?.let { Nowcast.motion(it, grid, thr) }, thr, heavy)
-                    saveOutlook(place, result.summary)
+                    saveOutlook(place, nowcastSummary(result))
                     maybeNotifyRain(place, result)
                     if (place.id == widgetId) {
                         runCatching { RadarWidget.publish(context, place, grid, kind, result, widgetWarning) }
@@ -202,11 +204,11 @@ class AlertChecker(private val context: Context) {
         if (System.currentTimeMillis() - prefs.getLong(key, 0) < 90 * 60_000L) return
         if (!canNotify()) return
         prefs.edit().putLong(key, System.currentTimeMillis()).apply()
-        val title = (if (r.heavy) "Heavy rain" else "Rain") + " in about $minutes min at ${place.name}"
+        val title = if (r.heavy) tr("Heavy rain in about %s min at %s", minutes, place.name) else tr("Rain in about %s min at %s", minutes, place.name)
         val n = NotificationCompat.Builder(context, HooklineApp.CHANNEL_RAIN)
             .setSmallIcon(app.hookline.radar.R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
-            .setContentText("From the latest radar and how the rain is moving. Tap to see it.")
+            .setContentText(tr("From the latest radar and how the rain is moving. Tap to see it."))
             .setContentIntent(RadarWidget.openAppIntent(context))
             .setAutoCancel(true)
             .build()
@@ -227,10 +229,7 @@ class AlertChecker(private val context: Context) {
     private fun notify(place: String, w: WarningItem) {
         if (!canNotify()) return
         val until = w.expires?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("EEE HH:mm"))
-        val title = buildString {
-            append(w.event).append(" for ").append(place)
-            if (until != null) append(" until ").append(until)
-        }
+        val title = if (until != null) tr("%s for %s until %s", w.event, place, until) else tr("%s for %s", w.event, place)
         val n = NotificationCompat.Builder(context, HooklineApp.CHANNEL_WARNINGS)
             .setSmallIcon(app.hookline.radar.R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
@@ -252,10 +251,7 @@ class AlertChecker(private val context: Context) {
     private fun notify(place: String, a: Alert) {
         if (!canNotify()) return
         val until = a.expires?.atZone(ZoneId.systemDefault())?.format(DateTimeFormatter.ofPattern("h:mm a"))
-        val title = buildString {
-            append(a.event).append(" for ").append(place)
-            if (until != null) append(" until ").append(until)
-        }
+        val title = if (until != null) tr("%s for %s until %s", a.event, place, until) else tr("%s for %s", a.event, place)
         val n = NotificationCompat.Builder(context, HooklineApp.CHANNEL_WARNINGS)
             .setSmallIcon(app.hookline.radar.R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)

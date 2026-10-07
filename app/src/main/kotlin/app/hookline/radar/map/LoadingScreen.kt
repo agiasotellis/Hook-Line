@@ -34,6 +34,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.hookline.radar.R
 import app.hookline.radar.core.designsystem.Hookline
+import app.hookline.radar.i18n.tr
 
 /**
  * Covers the map while it and the first radar image load, so the app never
@@ -49,7 +50,7 @@ fun LoadingScreen(visible: Boolean, status: String) {
             Modifier.fillMaxSize().background(c.mapVoid)
                 // Swallow touches so the map underneath can't be moved blind.
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                .semantics { contentDescription = "Hookline is loading: $status" },
+                .semantics { contentDescription = tr("Hookline is loading: %s", status) },
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_launcher_foreground),

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="channel_warnings">Warnungen für deine Orte</string>
+    <string name="channel_storm_mode">Status des Gewittermodus</string>
+    <string name="disclaimer">Folge den amtlichen Hinweisen des NWS und der Behörden vor Ort. Hookline zeigt NWS-Daten und ist kein Warndienst.</string>
+    <string name="widget_description">Radar rund um deinen Ort, Regen in der nächsten Stunde und Warnungen</string>
+    <string name="widget_name">Hookline-Radar</string>
+</resources>

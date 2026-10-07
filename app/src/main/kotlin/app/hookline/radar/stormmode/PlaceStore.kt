@@ -3,6 +3,7 @@ package app.hookline.radar.stormmode
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import app.hookline.radar.i18n.tr
 
 /**
  * A place Storm Mode watches. Id 0 is the automatic "Current location";
@@ -52,7 +53,7 @@ class PlaceStore(context: Context) {
 
     fun add(name: String, lat: Double, lon: Double, region: String?): Place {
         val list = saved()
-        val p = Place((list.maxOfOrNull { it.id } ?: 0) + 1, name.ifBlank { "Place ${list.size + 1}" }, lat, lon, region)
+        val p = Place((list.maxOfOrNull { it.id } ?: 0) + 1, name.ifBlank { tr("Place %s", list.size + 1) }, lat, lon, region)
         write(list + p)
         return p
     }

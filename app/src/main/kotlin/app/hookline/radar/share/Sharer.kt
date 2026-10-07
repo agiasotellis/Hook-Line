@@ -12,6 +12,7 @@ import androidx.core.content.FileProvider
 import app.hookline.radar.R
 import java.io.File
 import java.io.OutputStream
+import app.hookline.radar.i18n.tr
 
 /** Builds shareable pictures of the map and hands them to Android's share sheet. */
 object Sharer {
@@ -71,7 +72,7 @@ object Sharer {
             putExtra(Intent.EXTRA_TEXT, text)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(send, "Share radar").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        context.startActivity(Intent.createChooser(send, tr("Share radar")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     fun pixels(b: Bitmap): IntArray = IntArray(b.width * b.height).also { b.getPixels(it, 0, b.width, 0, 0, b.width, b.height) }

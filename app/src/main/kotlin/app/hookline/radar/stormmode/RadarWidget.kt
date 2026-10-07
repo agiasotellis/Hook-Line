@@ -39,6 +39,8 @@ import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.pow
+import app.hookline.radar.i18n.tr
+import app.hookline.radar.i18n.nowcastSummary
 
 /**
  * Home-screen widget: radar around your first place, its rain outlook and
@@ -73,7 +75,7 @@ class RadarWidget : AppWidgetProvider() {
             val time = DateTimeFormatter.ofPattern("HH:mm").format(Instant.ofEpochMilli(grid.timeMillis).atZone(ZoneId.systemDefault()))
             prefs(context).edit()
                 .putString("title", "${place.name} · $time")
-                .putString("outlook", r.summary)
+                .putString("outlook", nowcastSummary(r))
                 .putString("warning", warning ?: "")
                 .apply()
             show(context, AppWidgetManager.getInstance(context), ids)
@@ -85,7 +87,7 @@ class RadarWidget : AppWidgetProvider() {
             val file = imageFile(context)
             if (file.exists()) BitmapFactory.decodeFile(file.path)?.let { views.setImageViewBitmap(R.id.widget_image, it) }
             views.setTextViewText(R.id.widget_title, p.getString("title", null) ?: "Hookline")
-            views.setTextViewText(R.id.widget_outlook, p.getString("outlook", null) ?: "Open Hookline once to set up your places")
+            views.setTextViewText(R.id.widget_outlook, p.getString("outlook", null) ?: tr("Open Hookline once to set up your places"))
             val warning = p.getString("warning", "").orEmpty()
             views.setTextViewText(R.id.widget_warning, warning)
             views.setViewVisibility(R.id.widget_warning, if (warning.isEmpty()) View.GONE else View.VISIBLE)

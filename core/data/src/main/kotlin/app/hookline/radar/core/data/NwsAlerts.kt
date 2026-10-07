@@ -87,8 +87,12 @@ class NwsAlerts(
     private val userAgent: String,
     private val base: String = "https://api.weather.gov",
 ) {
+    /**
+     * Alerts covering a point. The point is rounded to 0.01° (about 1 km) before it
+     * leaves the phone: plenty to match warning areas, and kinder to privacy.
+     */
     suspend fun activeAt(point: LatLon): List<Alert> =
-        parse(get("$base/alerts/active?point=%.4f,%.4f".format(Locale.US, point.lat, point.lon)))
+        parse(get("$base/alerts/active?point=%.2f,%.2f".format(Locale.US, point.lat, point.lon)))
 
     suspend fun activeInArea(stateCode: String): List<Alert> = parse(get("$base/alerts/active?area=$stateCode"))
 

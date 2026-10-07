@@ -66,6 +66,8 @@ import app.hookline.radar.core.designsystem.SelectPill
 import app.hookline.radar.render.RadarGlView
 import java.util.Locale
 import kotlinx.coroutines.launch
+import app.hookline.radar.i18n.tr
+import app.hookline.radar.i18n.midSentence
 
 @Composable
 fun MapScreen(vm: MapViewModel = viewModel()) {
@@ -79,6 +81,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val radar = remember { RadarGlView(context).also { it.renderer.setClearColor(0xFF141B22.toInt()) } }
     val baseMap = remember { BaseMap(context) }
     var sheet by remember { mutableStateOf<Sheet?>(null) }
+    val entitlement = remember { app.hookline.radar.billing.Entitlement.get(context) }
+    val access by entitlement.access.collectAsStateWithLifecycle()
     // Loading screen: until the map style and the first radar picture are in (or 10 s at most).
     var mapReady by remember { mutableStateOf(false) }
     var loadingDone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
@@ -124,16 +128,19 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             baseMap.showLocation(context)
         }
     }
+    // Explain why before Android's permission prompt (asked once; "Not now" is remembered).
+    val prefs = remember { context.getSharedPreferences("onboarding", android.content.Context.MODE_PRIVATE) }
+    var askLocation by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (DeviceLocation.hasPermission(context)) DeviceLocation.request(context) { lat, lon -> vm.onLocation(lat, lon) }
-        else locationPermission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+        else if (!prefs.getBoolean("location_asked", false)) askLocation = true
     }
 
     DisposableEffect(lifecycle) {
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
                 Lifecycle.Event.ON_START -> baseMap.onStart()
-                Lifecycle.Event.ON_RESUME -> { baseMap.onResume(); radar.onResume() }
+                Lifecycle.Event.ON_RESUME -> { entitlement.refresh(); baseMap.onResume(); radar.onResume() }
                 Lifecycle.Event.ON_PAUSE -> { radar.onPause(); baseMap.onPause() }
                 Lifecycle.Event.ON_STOP -> baseMap.onStop()
                 else -> Unit
@@ -170,7 +177,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ChromePanel(
-                    Modifier.size(Dimens.MinTouch).clickable { sheet = Sheet.MENU }.semantics { contentDescription = "Menu" },
+                    Modifier.size(Dimens.MinTouch).clickable { sheet = Sheet.MENU }.semantics { contentDescription = tr("Menu") },
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { MenuIcon(c.ink) }
                 }
@@ -183,15 +190,15 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 StatusChip(s.status, s.showingLatest, s.mode)
                 if (s.warnings.isNotEmpty()) {
                     Box(Modifier.clickable { sheet = Sheet.WARNINGS }) {
-                        Chip(if (s.warnings.size == 1) "1 warning" else "${s.warnings.size} warnings", swatch = Color(s.warnings.first().argb))
+                        Chip(if (s.warnings.size == 1) tr("1 warning") else tr("%s warnings", s.warnings.size), swatch = Color(s.warnings.first().argb))
                     }
                 }
                 if (s.cells.isNotEmpty()) {
                     Box(Modifier.clickable { sheet = Sheet.CELLS }) {
-                        Chip(if (s.cells.size == 1) "1 storm" else "${s.cells.size} storms", swatch = Color(cellColor(s.cells.first())))
+                        Chip(if (s.cells.size == 1) tr("1 storm") else tr("%s storms", s.cells.size), swatch = Color(cellColor(s.cells.first())))
                     }
                 }
-                if (s.stormModeOn) Box(Modifier.clickable { sheet = Sheet.STORM }) { Chip("Storm Mode", dot = true) }
+                if (s.stormModeOn) Box(Modifier.clickable { sheet = Sheet.STORM }) { Chip(tr("Storm Mode"), dot = true) }
             }
             ArchiveBar(s, onPrev = { vm.archiveStep(-1) }, onNext = { vm.archiveStep(1) }, onPick = { sheet = Sheet.ARCHIVE }, onExit = vm::exitArchive)
         }
@@ -202,7 +209,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             horizontalAlignment = Alignment.End,
         ) {
             TiltLadder(tilts = s.tilts, selected = s.tilt, onSelect = vm::selectTilt)
-            MapButton(if (following) "Stop following your location" else "Show and follow your location", active = following, onClick = {
+            MapButton(if (following) tr("Stop following your location") else tr("Show and follow your location"), active = following, onClick = {
                 if (!DeviceLocation.hasPermission(context)) {
                     locationPermission.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
                 } else if (baseMap.showLocation(context)) {
@@ -211,23 +218,23 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 }
             }) { LocateIcon(it, following) }
             if (s.mode == Mode.SITE) {
-                MapButton(if (s.dualPane) "Single view" else "Reflectivity and velocity side by side", active = s.dualPane, onClick = {
+                MapButton(if (s.dualPane) tr("Single view") else tr("Reflectivity and velocity side by side"), active = s.dualPane, onClick = {
                     vm.setDualPane(!s.dualPane)
                 }) { DualIcon(it) }
             }
-            MapButton("Measure distance", active = s.measure != null, onClick = {
+            MapButton(tr("Measure distance"), active = s.measure != null, onClick = {
                 if (s.measure == null) vm.startMeasure() else vm.closeMeasure()
             }) { RulerIcon(it) }
             Box {
-                MapButton("Share", onClick = { if (busy == null) shareMenu = true }) { ShareIcon(it) }
+                MapButton(tr("Share"), onClick = { if (busy == null) shareMenu = true }) { ShareIcon(it) }
                 androidx.compose.material3.DropdownMenu(expanded = shareMenu, onDismissRequest = { shareMenu = false }) {
                     androidx.compose.material3.DropdownMenuItem(
-                        text = { Text("Share picture", style = Hookline.type.control) },
+                        text = { Text(tr("Share picture"), style = Hookline.type.control) },
                         onClick = { shareMenu = false; scope.launch { runCatching { share.still { busy = it } } } },
                     )
                     val canLoop = s.loop.available && s.loop.frames.size >= 2
                     androidx.compose.material3.DropdownMenuItem(
-                        text = { Text(if (canLoop) "Share loop (GIF)" else "Share loop (needs a loop)", style = Hookline.type.control) },
+                        text = { Text(if (canLoop) tr("Share loop (GIF)") else tr("Share loop (needs a loop)"), style = Hookline.type.control) },
                         enabled = canLoop,
                         onClick = { shareMenu = false; scope.launch { runCatching { share.loop { busy = it } } } },
                     )
@@ -235,7 +242,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             }
             ChromePanel(
                 Modifier.size(Dimens.MinTouch).clickable { sheet = Sheet.LAYERS }
-                    .semantics { contentDescription = "Layers and offline maps" },
+                    .semantics { contentDescription = tr("Layers and offline maps") },
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { LayersIcon(c.ink) }
             }
@@ -250,7 +257,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                             putExtra(android.content.Intent.EXTRA_SUBJECT, "Hookline crash report")
                             putExtra(android.content.Intent.EXTRA_TEXT, report)
                         }
-                        context.startActivity(android.content.Intent.createChooser(send, "Send crash report"))
+                        context.startActivity(android.content.Intent.createChooser(send, tr("Send crash report")))
                         app.hookline.radar.CrashLog.clear(context); crash = null
                     },
                     onDismiss = { app.hookline.radar.CrashLog.clear(context); crash = null },
@@ -263,19 +270,35 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         }
     }
 
+    // After the free trial: the paywall covers the map until the one-time unlock.
+    if (!access.allowed) {
+        app.hookline.radar.billing.PaywallScreen(access, entitlement::purchase, entitlement::restore)
+    }
+    if (askLocation) {
+        LocationRationale(
+            onAllow = {
+                prefs.edit().putBoolean("location_asked", true).apply(); askLocation = false
+                locationPermission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+            },
+            onLater = { prefs.edit().putBoolean("location_asked", true).apply(); askLocation = false },
+        )
+    }
     val close = { sheet = null }
     if (s.crossSection != null || s.crossSectionNote != null) CrossSectionSheet(s, onDismiss = vm::closeCrossSection)
     LoadingScreen(
         visible = !loadingDone,
         status = when {
-            !mapReady -> "Loading map"
-            s.mode == Mode.COMPOSITE -> "Loading European radar"
-            s.mode == Mode.SITE && s.site != null -> "Connecting to ${s.site!!.label}"
-            else -> "Finding radar near you"
+            !mapReady -> tr("Loading map")
+            s.mode == Mode.COMPOSITE -> tr("Loading European radar")
+            s.mode == Mode.SITE && s.site != null -> tr("Connecting to %s", s.site!!.label)
+            else -> tr("Finding radar near you")
         },
     )
     when (sheet) {
-        Sheet.MENU -> MenuSheet(s, onPick = { if (it == Sheet.ARCHIVE) vm.openArchive(); sheet = it }, onDismiss = close)
+        Sheet.MENU -> MenuSheet(
+            s, onPick = { if (it == Sheet.ARCHIVE) vm.openArchive(); sheet = it }, onDismiss = close,
+            top = { app.hookline.radar.billing.TrialCard(access, entitlement::purchase, entitlement::restore) },
+        )
         Sheet.CELLS -> CellsSheet(s, onShow = { vm.showCell(it); sheet = null }, onDismiss = close)
         Sheet.ARCHIVE -> ArchiveSheet(
             s,
@@ -334,14 +357,14 @@ private fun CrashCard(onSend: () -> Unit, onDismiss: () -> Unit) {
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("Hookline closed unexpectedly last time", style = Hookline.type.control, color = c.ink)
+        Text(tr("Hookline closed unexpectedly last time"), style = Hookline.type.control, color = c.ink)
         Text(
-            "A technical report was saved on this phone. Sending it shows exactly what went wrong; it contains no location or personal data.",
+            tr("A technical report was saved on this phone. Sending it shows exactly what went wrong; it contains no location or personal data."),
             style = Hookline.type.caption, color = c.inkSecondary,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Send report", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onSend).padding(vertical = 8.dp))
-            Text("Dismiss", style = Hookline.type.control, color = c.inkSecondary, modifier = Modifier.clickable(onClick = onDismiss).padding(vertical = 8.dp))
+            Text(tr("Send report"), style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onSend).padding(vertical = 8.dp))
+            Text(tr("Dismiss"), style = Hookline.type.control, color = c.inkSecondary, modifier = Modifier.clickable(onClick = onDismiss).padding(vertical = 8.dp))
         }
     }
 }
@@ -359,20 +382,20 @@ private fun MenuIcon(color: Color) {
 @Composable
 private fun SiteChip(s: MapUiState, onClick: () -> Unit) {
     val (title, subtitle) = when {
-        s.mode == Mode.COMPOSITE -> "Europe" to "All radars combined"
-        s.mode == Mode.MOSAIC -> "US mosaic" to "Zoom in for a radar"
+        s.mode == Mode.COMPOSITE -> tr("Europe") to tr("All radars combined")
+        s.mode == Mode.MOSAIC -> tr("US mosaic") to tr("Zoom in for a radar")
         s.site != null -> s.site.label to s.site.name
-        s.satellite -> "Satellite" to "No open radar here"
-        else -> "No radar" to "No open data here"
+        s.satellite -> tr("Satellite") to tr("No open radar here")
+        else -> tr("No radar") to tr("No open data here")
     }
     Box {
         ChromePanel(Modifier.height(Dimens.MinTouch).clickable(onClick = onClick).semantics {
-            contentDescription = "Radar: $title, $subtitle. Tap to choose a radar."
+            contentDescription = tr("Radar: %s, %s. Tap to choose a radar.", title, subtitle)
         }) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.Center) {
                 Text(title, style = Hookline.type.title, color = Hookline.colors.ink, maxLines = 1)
                 Text(
-                    if (s.autoSite) "$subtitle, auto" else subtitle,
+                    if (s.autoSite) tr("%s, auto", subtitle) else subtitle,
                     style = Hookline.type.caption, color = Hookline.colors.inkSecondary, maxLines = 1,
                 )
             }
@@ -385,7 +408,7 @@ private fun WarningBanner(w: WarningItem, modifier: Modifier = Modifier) {
     val c = Hookline.colors
     val color = Color(w.argb)
     val headline = w.event
-    val detail = "Home" + (w.expires?.let { ", until " + MapViewModel.clock(it.toEpochMilli()) } ?: "")
+    val detail = w.expires?.let { tr("Home, until %s", MapViewModel.clock(it.toEpochMilli())) } ?: tr("Home")
     Row(
         modifier
             .height(Dimens.MinTouch)
@@ -406,11 +429,11 @@ private fun WarningBanner(w: WarningItem, modifier: Modifier = Modifier) {
 @Composable
 private fun StatusChip(status: FeedStatus, latest: Boolean, mode: Mode) {
     when {
-        !latest && status == FeedStatus.Live -> Chip("Looping, not live")
-        mode == Mode.MOSAIC -> Chip("US mosaic, updates every few minutes", dot = true)
-        status == FeedStatus.Connecting -> Chip(if (mode == Mode.COMPOSITE) "Loading European radar…" else "Connecting to radar…")
-        status == FeedStatus.Live -> Chip(if (mode == Mode.COMPOSITE) "Live composite, every 5 min" else "Live", dot = true)
-        status is FeedStatus.Stale -> Chip("Not updating: ${status.message}", strong = true)
+        !latest && status == FeedStatus.Live -> Chip(tr("Looping, not live"))
+        mode == Mode.MOSAIC -> Chip(tr("US mosaic, updates every few minutes"), dot = true)
+        status == FeedStatus.Connecting -> Chip(if (mode == Mode.COMPOSITE) tr("Loading European radar…") else tr("Connecting to radar…"))
+        status == FeedStatus.Live -> Chip(if (mode == Mode.COMPOSITE) tr("Live composite, every 5 min") else tr("Live"), dot = true)
+        status is FeedStatus.Stale -> Chip(tr("Not updating: %s", status.message), strong = true)
         status is FeedStatus.NoCoverage -> Chip(status.message, strong = true)
     }
 }
@@ -497,7 +520,7 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
                 Modifier.size(48.dp).alpha(if (canPlay) 1f else 0.35f)
                     .border(1.dp, c.hairline, CircleShape)
                     .clickable(enabled = canPlay, onClick = onPlay)
-                    .semantics { contentDescription = if (s.loop.playing) "Pause loop" else "Play loop" },
+                    .semantics { contentDescription = if (s.loop.playing) tr("Pause loop") else tr("Play loop") },
                 contentAlignment = Alignment.Center,
             ) { PlayPauseIcon(s.loop.playing, c.ink) }
             Column(Modifier.weight(1f)) {
@@ -505,10 +528,10 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
                 Text(
                     s.loop.loading ?: when {
                         s.mode == Mode.NONE -> ""
-                        s.mode == Mode.MOSAIC -> "Loops: zoom in to a radar"
-                        !s.loop.available && s.mode == Mode.COMPOSITE -> "Loop needs at least two composites"
-                        !s.loop.available -> "Loops cover the lowest tilt for REF and velocity"
-                        s.frameEndMillis != null -> MapViewModel.clock(s.frameEndMillis) + if (s.showingLatest) ", latest" else ""
+                        s.mode == Mode.MOSAIC -> tr("Loops: zoom in to a radar")
+                        !s.loop.available && s.mode == Mode.COMPOSITE -> tr("Loop needs at least two composites")
+                        !s.loop.available -> tr("Loops cover the lowest tilt for REF and velocity")
+                        s.frameEndMillis != null -> MapViewModel.clock(s.frameEndMillis) + if (s.showingLatest) ", " + tr("latest") else ""
                         else -> ""
                     },
                     style = Hookline.type.caption, color = c.inkSecondary, maxLines = 1,
@@ -517,7 +540,7 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
             val age = s.frameAgeSeconds
             Readout(
                 value = age?.let { if (it < 3600) "%d:%02d".format(Locale.US, it / 60, it % 60) else "${it / 3600} h" } ?: "–",
-                caption = if (age != null && age > 600 && s.showingLatest) "scan age, stale" else "scan age",
+                caption = if (age != null && age > 600 && s.showingLatest) tr("scan age, stale") else tr("scan age"),
                 alignEnd = true,
             )
         }
@@ -533,7 +556,7 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
             }
         }
         Text(
-            listOf(s.attribution, "Map ${BaseMap.ATTRIBUTION}").filter { it.isNotEmpty() }.joinToString(". "),
+            listOf(s.attribution, tr("Map %s", BaseMap.ATTRIBUTION)).filter { it.isNotEmpty() }.joinToString(". "),
             style = Hookline.type.caption, color = c.inkSecondary, maxLines = 2,
         )
     }
@@ -565,7 +588,7 @@ private fun LoopTape(loop: LoopUi, onScrub: (Int) -> Unit, modifier: Modifier = 
     fun indexAt(x: Float, width: Float) = if (n <= 1) 0 else ((x / width) * (n - 1)).let { Math.round(it) }.coerceIn(0, n - 1)
     Canvas(
         modifier
-            .semantics { contentDescription = if (n > 0) "Loop frame ${current + 1} of $n. Drag to scrub." else "Loop is empty" }
+            .semantics { contentDescription = if (n > 0) tr("Loop frame %s of %s. Drag to scrub.", current + 1, n) else tr("Loop is empty") }
             .pointerInput(n) { detectTapGestures { o -> onScrub(indexAt(o.x, size.width.toFloat())) } }
             .pointerInput(n) { detectHorizontalDragGestures { change, _ -> onScrub(indexAt(change.position.x, size.width.toFloat())) } },
     ) {
@@ -596,14 +619,14 @@ private fun Legend(s: MapUiState) {
         if (lut.size >= 2) Box(Modifier.weight(1f).height(6.dp).background(Brush.horizontalGradient(lut), RoundedCornerShape(3.dp)))
         if (product == Product.SRV) {
             Text(
-                "${s.motion.fromDeg}° at ${app.hookline.radar.core.data.Fmt.speed(s.motion.speedKt * 0.514444, s.units)}",
+                tr("%s° at %s", s.motion.fromDeg, app.hookline.radar.core.data.Fmt.speed(s.motion.speedKt * 0.514444, s.units)),
                 style = Hookline.type.caption, color = c.inkSecondary,
             )
         }
         Spacer(Modifier.width(4.dp))
     }
     if (product == Product.SRV) {
-        Text("Storm motion: ${s.motion.source.lowercase()}", style = Hookline.type.caption, color = c.inkSecondary)
+        Text(tr("Storm motion: %s", midSentence(s.motion.source)), style = Hookline.type.caption, color = c.inkSecondary)
     }
 }
 
@@ -636,21 +659,21 @@ private fun LayersSheet(
         ) {
             val intensity = s.intensity
             val loopLength = s.loopLength
-            Text("Layers", style = Hookline.type.title, color = c.ink)
-            ToggleRow("Satellite where there's no radar", "Infrared clouds from GOES, Meteosat and Himawari", s.satellite, onSatellite)
-            ToggleRow("Warnings on the map", "NWS in the US, MeteoAlarm in Europe", s.showWarnings, onWarnings)
-            ToggleRow("Lightning", s.lightningInfo ?: "Americas: NOAA GOES, about 1 MB a minute. Europe and Africa: Meteosat.", s.lightning, onLightning)
-            ToggleRow("Storm cells", "Rings and 30-minute paths for storms of 40 dBZ and up", s.showCells, onCells)
-            Text("US hail and rotation", style = Hookline.type.body, color = c.ink)
+            Text(tr("Layers"), style = Hookline.type.title, color = c.ink)
+            ToggleRow(tr("Satellite where there's no radar"), tr("Infrared clouds from GOES, Meteosat and Himawari"), s.satellite, onSatellite)
+            ToggleRow(tr("Warnings on the map"), tr("NWS in the US, MeteoAlarm in Europe"), s.showWarnings, onWarnings)
+            ToggleRow(tr("Lightning"), s.lightningInfo ?: tr("Americas: NOAA GOES, about 1 MB a minute. Europe and Africa: Meteosat."), s.lightning, onLightning)
+            ToggleRow(tr("Storm cells"), tr("Rings and 30-minute paths for storms of 40 dBZ and up"), s.showCells, onCells)
+            Text(tr("US hail and rotation"), style = Hookline.type.body, color = c.ink)
             PillRow {
-                listOf(null to "Off", app.hookline.radar.core.data.MrmsTracks.Product.HAIL_24H to "Hail 24 h",
-                    app.hookline.radar.core.data.MrmsTracks.Product.ROTATION_60M to "Rotation 1 h").forEach { (p, label) ->
+                listOf(null to tr("Off"), app.hookline.radar.core.data.MrmsTracks.Product.HAIL_24H to tr("Hail 24 h"),
+                    app.hookline.radar.core.data.MrmsTracks.Product.ROTATION_60M to tr("Rotation 1 h")).forEach { (p, label) ->
                     SelectPill(label, selected = s.trackOverlay == p, onClick = { onTracks(p) }, modifier = Modifier.weight(1f))
                 }
             }
             s.overlayInfo?.let { Text(it, style = Hookline.type.caption, color = c.inkSecondary) }
-            ToggleRow("Night vision", "Everything in dim red, to keep your eyes adjusted outdoors", s.redNight, onRedNight)
-            Text("Units", style = Hookline.type.body, color = c.ink)
+            ToggleRow(tr("Night vision"), tr("Everything in dim red, to keep your eyes adjusted outdoors"), s.redNight, onRedNight)
+            Text(tr("Units"), style = Hookline.type.body, color = c.ink)
             PillRow {
                 app.hookline.radar.core.data.UnitSystem.entries.forEach { u ->
                     SelectPill(
@@ -660,15 +683,15 @@ private fun LayersSheet(
                 }
             }
             Spacer(Modifier.height(6.dp))
-            Text("Map", style = Hookline.type.title, color = c.ink)
-            LabeledSlider("Roads", intensity.roads, sliderColors) { onIntensity(intensity.copy(roads = it)) }
-            LabeledSlider("Place names", intensity.labels, sliderColors) { onIntensity(intensity.copy(labels = it)) }
-            LabeledSlider("Borders", intensity.borders, sliderColors) { onIntensity(intensity.copy(borders = it)) }
+            Text(tr("Map"), style = Hookline.type.title, color = c.ink)
+            LabeledSlider(tr("Roads"), intensity.roads, sliderColors) { onIntensity(intensity.copy(roads = it)) }
+            LabeledSlider(tr("Place names"), intensity.labels, sliderColors) { onIntensity(intensity.copy(labels = it)) }
+            LabeledSlider(tr("Borders"), intensity.borders, sliderColors) { onIntensity(intensity.copy(borders = it)) }
 
             Spacer(Modifier.height(6.dp))
-            Text("Loop", style = Hookline.type.title, color = c.ink)
+            Text(tr("Loop"), style = Hookline.type.title, color = c.ink)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Frames", style = Hookline.type.body, color = c.ink, modifier = Modifier.weight(1f))
+                Text(tr("Frames"), style = Hookline.type.body, color = c.ink, modifier = Modifier.weight(1f))
                 Text("$loopLength", style = Hookline.type.control, color = c.inkSecondary)
             }
             Slider(
@@ -676,14 +699,14 @@ private fun LayersSheet(
                 valueRange = 2f..24f, steps = 21, colors = sliderColors,
             )
             Text(
-                "Earlier frames load when you open a radar, about 1–2 MB each. Takes effect next time you switch radars.",
+                tr("Earlier frames load when you open a radar, about 1–2 MB each. Takes effect next time you switch radars."),
                 style = Hookline.type.caption, color = c.inkSecondary,
             )
 
             Spacer(Modifier.height(6.dp))
-            Text("Offline maps", style = Hookline.type.title, color = c.ink)
+            Text(tr("Offline maps"), style = Hookline.type.title, color = c.ink)
             Text(
-                "Save the map you're looking at for places with no signal. Radar still needs a connection.",
+                tr("Save the map you're looking at for places with no signal. Radar still needs a connection."),
                 style = Hookline.type.caption, color = c.inkSecondary,
             )
             val busy = offline.progress != null
@@ -694,7 +717,7 @@ private fun LayersSheet(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    if (busy) "Saving… ${((offline.progress ?: 0f) * 100).toInt()}%" else "Save this map area",
+                    if (busy) tr("Saving… %s%%", ((offline.progress ?: 0f) * 100).toInt()) else tr("Save this map area"),
                     style = Hookline.type.control, color = if (busy) c.ink else c.inkOnSelected,
                 )
             }
@@ -707,12 +730,12 @@ private fun LayersSheet(
                     Column(Modifier.weight(1f)) {
                         Text(r.name, style = Hookline.type.body, color = c.ink)
                         Text(
-                            r.sizeMb?.let { "%.0f MB".format(Locale.US, it) + if (r.complete) "" else ", incomplete" } ?: "",
+                            r.sizeMb?.let { "%.0f MB".format(Locale.US, it) + if (r.complete) "" else ", " + tr("incomplete") } ?: "",
                             style = Hookline.type.caption, color = c.inkSecondary,
                         )
                     }
                     Text(
-                        "Delete",
+                        tr("Delete"),
                         style = Hookline.type.control, color = c.ink,
                         modifier = Modifier.clickable { onDelete(r.id) }.padding(12.dp),
                     )
@@ -728,7 +751,7 @@ private fun LabeledSlider(label: String, value: Float, colors: androidx.compose.
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = Hookline.type.body, color = c.ink, modifier = Modifier.weight(1f))
-            Text(if (value <= 0.01f) "Off" else "${(value * 100).toInt()}%", style = Hookline.type.control, color = c.inkSecondary)
+            Text(if (value <= 0.01f) tr("Off") else "${(value * 100).toInt()}%", style = Hookline.type.control, color = c.inkSecondary)
         }
         Slider(value = value, onValueChange = onChange, colors = colors)
     }
