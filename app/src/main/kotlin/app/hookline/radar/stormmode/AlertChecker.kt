@@ -31,11 +31,22 @@ class AlertChecker(private val context: Context) {
         BuildConfig.NWS_USER_AGENT,
     )
 
-    /** Saved places. Interim: a single default until the Places screen exists. */
-    fun places(): List<Pair<String, LatLon>> = listOf("Home" to LatLon(
-        prefs.getFloat("home_lat", 35.3395f).toDouble(),
-        prefs.getFloat("home_lon", -97.4867f).toDouble(),
-    ))
+    /**
+     * Saved places. Interim: "Home" is set from the device location when it's
+     * inside NWS coverage, until the Places screen exists. Outside the US
+     * there are no places, so nothing is checked (European warnings come later).
+     */
+    fun places(): List<Pair<String, LatLon>> {
+        if (!prefs.contains("home_lat")) return emptyList()
+        return listOf("Home" to LatLon(prefs.getFloat("home_lat", 0f).toDouble(), prefs.getFloat("home_lon", 0f).toDouble()))
+    }
+
+    fun setHome(p: LatLon?) {
+        val e = prefs.edit()
+        if (p == null) e.remove("home_lat").remove("home_lon")
+        else e.putFloat("home_lat", p.lat.toFloat()).putFloat("home_lon", p.lon.toFloat())
+        e.apply()
+    }
 
     suspend fun check(): List<Alert> {
         val found = mutableListOf<Alert>()

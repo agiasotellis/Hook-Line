@@ -30,7 +30,11 @@ class SweepTexture private constructor(
      * Mercator metres relative to the site when [projector] is given (live map),
      * or flat metres east/north otherwise (tests, widgets).
      */
-    fun wedgeMesh(projector: MercatorProjector? = null): FloatArray {
+    fun wedgeMesh(
+        projector: MercatorProjector? = null,
+        radarLat: Double = projector?.siteLat ?: 0.0,
+        radarLon: Double = projector?.siteLon ?: 0.0,
+    ): FloatArray {
         val out = FloatArray(radialCount * 6 * 4)
         val r0 = RadialGeometry.groundRangeMeters(firstGateMeters - gateSpacingMeters / 2.0, elevationDeg.toDouble())
         val r1 = RadialGeometry.groundRangeMeters(
@@ -38,7 +42,7 @@ class SweepTexture private constructor(
         )
         fun corner(azDeg: Double, r: Double): Pair<Float, Float> {
             if (projector != null) {
-                val (x, y) = projector.fromPolar(azDeg, r)
+                val (x, y) = projector.fromPolarAt(radarLat, radarLon, azDeg, r)
                 return x.toFloat() to y.toFloat()
             }
             val a = Math.toRadians(azDeg)

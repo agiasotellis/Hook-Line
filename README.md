@@ -1,6 +1,6 @@
 # Hookline Radar
 
-**The professional weather radar you buy once.** Every product, every tilt, every warning and thirty years of archive, for one price on Android. No tiers, no subscriptions, no account, no ads.
+**The professional weather radar you buy once.** Every product, every tilt, every warning and thirty years of archive, for one price on Android. No tiers, no subscriptions, no account, no ads. Works in the US and across Europe.
 
 <p>
   <img src="docs/img/ref_full.png" width="240" alt="Reflectivity mockup with a hook-echo supercell">
@@ -25,8 +25,10 @@ Full teardown: [`docs/01-COMPETITIVE-ANALYSIS.md`](docs/01-COMPETITIVE-ANALYSIS.
 ## Project layout
 ```
 app/                 Compose UI (map screen), Storm Mode worker + foreground service
-core/radar/          NEXRAD Level II decoder, palettes (.pal import), polar geometry, SRV, rasterizer
-core/data/           NOAA S3 (real-time chunks + archive), NWS alerts API
+core/radar/          NEXRAD Level II + HDF5/ODIM decoders, projections, palettes, polar geometry, SRV
+core/data/           NOAA S3 (NEXRAD), EUMETNET Open Radar Data (Europe), NWS alerts, site catalogue
+tools/sites/         Generator for the site catalogue
+tools/odim-fixtures/ Generator for the synthetic ODIM test files
 core/designsystem/   Hookline theme tokens and components
 tools/mockup-radar/  Generator for the synthetic supercell imagery used in mockups
 ```
@@ -45,23 +47,27 @@ CI (GitHub Actions) runs both on every push and uploads the debug APK as an arti
 Alpha (milestone M1 in progress).
 
 Working now:
-- **Live radar**: streams NEXRAD Level II real-time chunks straight from NOAA's public bucket and shows each tilt the moment it finishes scanning. Handles split cuts, SAILS re-scans and the 1–999 volume-number wraparound.
-- **Base map**: MapLibre vector map (OpenFreeMap / OpenStreetMap) drawn *above* the radar on a transparent layer, so roads and town names stay readable over echoes. Radar is projected in Web Mercator with great-circle placement, locked to the map camera. Sliders for roads, names and borders.
+- **Coverage**: 291 radars with open single-site data (155 NEXRAD in the US, 136 OPERA radars in 21 European countries) plus the OPERA pan-European composite (1 km, every 5 minutes), which also covers countries that don't share single-site data, such as Greece. The app starts at your location and switches to the nearest open radar as you zoom in; zoomed out in Europe it shows the composite.
+- **Live radar**: NEXRAD Level II real-time chunks (each tilt as soon as it's scanned) and European ODIM_H5 scans from EUMETNET's Open Radar Data cache; European tilts beyond the lowest download on demand to save data.
+- **Own HDF5/ODIM decoder**: dependency-free Java, verified value-for-value against h5py on real Belgian, Dutch and Australian files and on synthetic files in old and new HDF5 layouts. Composite projections (LAEA, LCC, polar stereographic, Mercator) match PROJ to under 2 mm.
+- **Base map**: MapLibre vector map (OpenFreeMap / OpenStreetMap) drawn *above* the radar on a transparent layer; one Web Mercator origin for all layers. Sliders for roads, names and borders.
 - **Offline maps**: save the visible area (zoom 3–10) for chasing without signal.
-- **Loops**: 0.5° REF / VEL / SRV. Earlier frames are backfilled from the first chunks of previous volumes (~1–2 MB each); new scans append live. Play, pause, tap or drag to scrub.
-- **Storm motion**: SRV uses the motion from the NWS warning nearest where you're looking; storm tracks drawn to +45 min.
-- **GPU renderer**: OpenGL ES 3, one wedge per radial, R32F value texture sampled nearest-bin, palette LUT in the shader.
-- **Products**: REF, VEL, storm-relative velocity, CC, ZDR, every available tilt.
-- **Inspector**: long-press any point for the value, a plain-English meaning, beam height and distance.
-- **Warnings**: tornado, severe and flash-flood outlines; banner when one covers your Home place.
-- **Offline fallback**: a clearly labelled synthetic demo storm when the feed can't be reached.
+- **Loops**: lowest-tilt REF / VEL / SRV for single radars (backfilled from earlier cycles); composite loops in Europe.
+- **Storm motion**: SRV uses the NWS warning nearest where you're looking (US); storm tracks drawn to +45 min.
+- **GPU renderer**: OpenGL ES 3; radar wedges and composite tiles both drawn from R32F value textures, nearest-sample, palette LUT in the shader.
+- **Inspector**: long-press for the value, a plain-English meaning, beam height and distance (or the column maximum on the composite).
+- **Warnings**: US NWS tornado, severe and flash-flood outlines; Storm Mode notifications for your location in the US.
 
-Next: full site list with nearest-radar switching, mosaic (MRMS) when zoomed out, notification permission and Storm Mode settings, legacy Message 1 for pre-2008 archives.
+Not yet: European warnings (MeteoAlarm), satellite imagery for regions with no open radar, a US mosaic when zoomed out, dual-pol in Europe (OPERA doesn't exchange it until ~2027).
 
 Test builds: every push to `main` publishes split APKs on the Releases page (`arm64-v8a` for most phones).
 
 ## Data
-Radar and warning data courtesy of NOAA / National Weather Service, accessed via the NOAA Open Data Dissemination program on AWS and api.weather.gov. Hookline is not affiliated with or endorsed by NOAA or the NWS, and it is not an official warning service.
+- US radar and warning data courtesy of NOAA / National Weather Service, via the NOAA Open Data Dissemination program on AWS and api.weather.gov.
+- European radar data: EUMETNET OPERA and its member national weather services, via the EUMETNET Open Radar Data service (CC BY 4.0).
+- Base map: OpenFreeMap, OpenMapTiles, © OpenStreetMap contributors.
+
+Hookline is not affiliated with or endorsed by any of these organisations, and it is not an official warning service.
 
 ---
 © 2026 — all rights reserved (commercial app; no open-source licence granted).

@@ -40,8 +40,8 @@ class BaseMap(context: Context) {
 
     /** Fires on every camera frame (UI thread). */
     var onCameraMove: (() -> Unit)? = null
-    /** Fires when the camera settles, with the centre point. */
-    var onCameraIdle: ((LatLng) -> Unit)? = null
+    /** Fires when the camera settles: centre, zoom and visible bounds. */
+    var onCameraIdle: ((LatLng, Double, LatLngBounds?) -> Unit)? = null
     var onLongPress: ((LatLng) -> Unit)? = null
 
     private val roadLayers = mutableListOf<String>()
@@ -60,7 +60,7 @@ class BaseMap(context: Context) {
             .compassEnabled(false)
             .rotateGesturesEnabled(false) // north-up keeps radar geometry honest
             .tiltGesturesEnabled(false)
-            .minZoomPreference(3.0)
+            .minZoomPreference(2.0)
             .maxZoomPreference(14.0)
         mapView = MapView(context, options)
         mapView.onCreate(null)
@@ -68,7 +68,10 @@ class BaseMap(context: Context) {
             map = m
             m.setStyle(Style.Builder().fromUri(STYLE_URL)) { style -> restyle(style) }
             m.addOnCameraMoveListener { onCameraMove?.invoke() }
-            m.addOnCameraIdleListener { onCameraIdle?.invoke(m.cameraPosition.target ?: LatLng(0.0, 0.0)); onCameraMove?.invoke() }
+            m.addOnCameraIdleListener {
+                onCameraIdle?.invoke(m.cameraPosition.target ?: LatLng(0.0, 0.0), m.cameraPosition.zoom, visibleBounds())
+                onCameraMove?.invoke()
+            }
             m.addOnMapLongClickListener { p -> onLongPress?.invoke(p); true }
             pendingCamera?.let { (t, z) -> m.moveCamera(CameraUpdateFactory.newLatLngZoom(t, z)) }
             pendingCamera = null
@@ -88,22 +91,26 @@ class BaseMap(context: Context) {
 
     /**
      * Radar viewport matching the map camera: centre and scale in Web Mercator
-     * metres relative to the radar site, measured from the map's own
-     * projection so the two layers cannot drift apart.
+     * metres relative to the session's render [origin], measured from the
+     * map's own projection around the camera target so the two layers can't
+     * drift apart anywhere on Earth.
      */
-    fun radarViewport(p: MercatorProjector, widthPx: Int, heightPx: Int): Viewport? {
-        val proj = map?.projection ?: return null
+    fun radarViewport(origin: MercatorProjector, widthPx: Int, heightPx: Int): Viewport? {
+        val m = map ?: return null
         if (widthPx <= 0 || heightPx <= 0) return null
-        val s0 = proj.toScreenLocation(LatLng(p.siteLat, p.siteLon))
+        val proj = m.projection
+        val target = m.cameraPosition.target ?: return null
+        val s0 = proj.toScreenLocation(target)
         val dLon = 0.5
-        val s1 = proj.toScreenLocation(LatLng(p.siteLat, p.siteLon + dLon))
+        val s1 = proj.toScreenLocation(LatLng(target.latitude, target.longitude + dLon))
         val px = (s1.x - s0.x).toDouble()
         if (px <= 0.0) return null
         val mpp = Math.toRadians(dLon) * MercatorProjector.R / px
+        val (tx, ty) = origin.fromLatLon(target.latitude, target.longitude)
         return Viewport(
             widthPx, heightPx,
-            centerEastM = -(s0.x - widthPx / 2.0) * mpp,
-            centerNorthM = (s0.y - heightPx / 2.0) * mpp,
+            centerEastM = tx - (s0.x - widthPx / 2.0) * mpp,
+            centerNorthM = ty + (s0.y - heightPx / 2.0) * mpp,
             metersPerPixel = mpp,
         )
     }

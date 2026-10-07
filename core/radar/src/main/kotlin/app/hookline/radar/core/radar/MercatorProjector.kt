@@ -27,8 +27,12 @@ class MercatorProjector(val siteLat: Double, val siteLon: Double) {
         return Math.toRadians(dLon) * R to (mercY(lat) - y0)
     }
 
-    fun fromPolar(azimuthDeg: Double, groundRangeM: Double): Pair<Double, Double> {
-        val (lat, lon) = RadialGeometry.destination(siteLat, siteLon, azimuthDeg, groundRangeM)
+    fun fromPolar(azimuthDeg: Double, groundRangeM: Double): Pair<Double, Double> =
+        fromPolarAt(siteLat, siteLon, azimuthDeg, groundRangeM)
+
+    /** Polar coordinates around a radar at (lat, lon), projected relative to this projector's origin. */
+    fun fromPolarAt(radarLat: Double, radarLon: Double, azimuthDeg: Double, groundRangeM: Double): Pair<Double, Double> {
+        val (lat, lon) = RadialGeometry.destination(radarLat, radarLon, azimuthDeg, groundRangeM)
         return fromLatLon(lat, lon)
     }
 

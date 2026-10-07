@@ -86,14 +86,22 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     // The map owns gestures; the radar follows its camera exactly.
     LaunchedEffect(baseMap) {
         baseMap.onCameraMove = {
-            baseMap.radarViewport(latest.projector, baseMap.mapView.width, baseMap.mapView.height)?.let(radar::setViewport)
+            baseMap.radarViewport(latest.origin, baseMap.mapView.width, baseMap.mapView.height)?.let(radar::setViewport)
         }
         baseMap.onCameraIdle = vm::onCameraIdle
         baseMap.onLongPress = vm::inspect
     }
-    LaunchedEffect(s.site.id) { baseMap.moveTo(s.site.location.lat, s.site.location.lon, 7.0) }
-    LaunchedEffect(s.projector) { baseMap.onCameraMove?.invoke() }
+    LaunchedEffect(s.camera?.seq) { s.camera?.let { baseMap.moveTo(it.lat, it.lon, it.zoom) } }
     LaunchedEffect(s.intensity) { baseMap.setIntensity(s.intensity) }
+
+    // Start where the user is (coarse location is enough to pick radars).
+    val locationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted -> if (granted) DeviceLocation.request(context) { lat, lon -> vm.onLocation(lat, lon) } }
+    LaunchedEffect(Unit) {
+        if (DeviceLocation.hasPermission(context)) DeviceLocation.request(context) { lat, lon -> vm.onLocation(lat, lon) }
+        else locationPermission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+    }
 
     DisposableEffect(lifecycle) {
         val obs = LifecycleEventObserver { _, e ->
@@ -116,7 +124,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         AndroidView(
             factory = { radar },
             update = { v ->
-                v.setFrame(s.frame)
+                v.setLayers(s.compositeLayer, s.siteLayer)
                 v.setOutlines(s.outlines)
             },
             modifier = Modifier.fillMaxSize(),
@@ -129,7 +137,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SiteChip(s, onSelect = vm::selectSite)
+                SiteChip(s, onSelect = vm::selectSite, onAuto = vm::setAutoSite)
                 s.homeWarning?.let { w ->
                     WarningBanner(
                         headline = w.event,
@@ -140,7 +148,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusChip(s.status, s.showingLatest)
+                StatusChip(s.status, s.showingLatest, s.mode)
                 if (s.stormModeOn) Chip("Storm Mode on", dot = true)
             }
         }
@@ -182,21 +190,33 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
 }
 
 @Composable
-private fun SiteChip(s: MapUiState, onSelect: (RadarSite) -> Unit) {
+private fun SiteChip(s: MapUiState, onSelect: (RadarSite) -> Unit, onAuto: () -> Unit) {
     var open by remember { mutableStateOf(false) }
+    val (title, subtitle) = when {
+        s.mode == Mode.COMPOSITE -> "Europe" to "All radars combined"
+        s.site != null -> s.site.label to s.site.name
+        else -> "No radar" to "No open data here"
+    }
     Box {
         ChromePanel(Modifier.height(Dimens.MinTouch).clickable { open = true }.semantics {
-            contentDescription = "Radar site ${s.site.id}, ${s.site.name}. Tap to change."
+            contentDescription = "Radar: $title, $subtitle. Tap to choose a radar."
         }) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.Center) {
-                Text(s.site.id, style = Hookline.type.title, color = Hookline.colors.ink)
-                Text(s.site.name, style = Hookline.type.caption, color = Hookline.colors.inkSecondary)
+                Text(title, style = Hookline.type.title, color = Hookline.colors.ink, maxLines = 1)
+                Text(
+                    if (s.autoSite) "$subtitle, auto" else subtitle,
+                    style = Hookline.type.caption, color = Hookline.colors.inkSecondary, maxLines = 1,
+                )
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            s.sites.forEach { site ->
+            DropdownMenuItem(
+                text = { Text(if (s.autoSite) "Nearest radar automatically (on)" else "Nearest radar automatically", style = Hookline.type.control) },
+                onClick = { open = false; onAuto() },
+            )
+            s.nearbySites.forEach { (site, km) ->
                 DropdownMenuItem(
-                    text = { Text("${site.id}  ${site.name}", style = Hookline.type.control) },
+                    text = { Text("${site.label}  ${site.name}  $km km", style = Hookline.type.control) },
                     onClick = { open = false; onSelect(site) },
                 )
             }
@@ -233,13 +253,13 @@ private fun WarningBanner(headline: String, detail: String, hazard: Hazard, modi
 }
 
 @Composable
-private fun StatusChip(status: FeedStatus, latest: Boolean) {
+private fun StatusChip(status: FeedStatus, latest: Boolean, mode: Mode) {
     when {
         !latest && status == FeedStatus.Live -> Chip("Looping, not live")
-        status == FeedStatus.Connecting -> Chip("Connecting to radar…")
-        status == FeedStatus.Live -> Chip("Live", dot = true)
+        status == FeedStatus.Connecting -> Chip(if (mode == Mode.COMPOSITE) "Loading European radar…" else "Connecting to radar…")
+        status == FeedStatus.Live -> Chip(if (mode == Mode.COMPOSITE) "Live composite, every 5 min" else "Live", dot = true)
         status is FeedStatus.Stale -> Chip("Not updating: ${status.message}", strong = true)
-        status is FeedStatus.Demo -> Chip("Demo storm, not real data", strong = true)
+        status is FeedStatus.NoCoverage -> Chip(status.message, strong = true)
     }
 }
 
@@ -331,6 +351,8 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
                 LoopTape(s.loop, onScrub, Modifier.fillMaxWidth().height(36.dp))
                 Text(
                     s.loop.loading ?: when {
+                        s.mode == Mode.NONE -> ""
+                        !s.loop.available && s.mode == Mode.COMPOSITE -> "Loop needs at least two composites"
                         !s.loop.available -> "Loops cover the lowest tilt for REF and velocity"
                         s.frameEndMillis != null -> MapViewModel.clock(s.frameEndMillis) + if (s.showingLatest) ", latest" else ""
                         else -> ""
@@ -350,15 +372,15 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
                 val enabled = p in s.availableProducts
                 SelectPill(
                     p.label,
-                    selected = p == s.product,
+                    selected = p == (if (s.mode == Mode.COMPOSITE) Product.REF else s.product),
                     onClick = { if (enabled) onProduct(p) },
                     modifier = Modifier.weight(1f).alpha(if (enabled) 1f else 0.35f),
                 )
             }
         }
         Text(
-            "Radar and warnings: NOAA / NWS. Map ${BaseMap.ATTRIBUTION}",
-            style = Hookline.type.caption, color = c.inkSecondary, maxLines = 1,
+            listOf(s.attribution, "Map ${BaseMap.ATTRIBUTION}").filter { it.isNotEmpty() }.joinToString(". "),
+            style = Hookline.type.caption, color = c.inkSecondary, maxLines = 2,
         )
     }
 }
@@ -408,7 +430,7 @@ private fun LoopTape(loop: LoopUi, onScrub: (Int) -> Unit, modifier: Modifier = 
 @Composable
 private fun Legend(s: MapUiState) {
     val c = Hookline.colors
-    val product = s.product
+    val product = if (s.mode == Mode.COMPOSITE) Product.REF else s.product
     val lut = remember(product) {
         product.palette.toLut(product.min, product.max, 24).filter { (it ushr 24) != 0 }.map { Color(it) }
     }

@@ -23,7 +23,11 @@ class RadarGlView(context: Context) : GLSurfaceView(context) {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
-    fun setFrame(frame: RadarFrame?) { renderer.setFrame(frame); requestRender() }
+    fun setLayers(composite: RasterLayer?, site: RasterLayer?) {
+        renderer.setCompositeLayer(composite)
+        renderer.setSiteLayer(site)
+        requestRender()
+    }
     fun setOutlines(list: List<Outline>) { renderer.setOutlines(list); requestRender() }
     fun setViewport(vp: Viewport) { renderer.setViewport(vp); requestRender() }
 }

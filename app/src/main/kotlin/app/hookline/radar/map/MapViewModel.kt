@@ -6,18 +6,25 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.hookline.radar.BuildConfig
 import app.hookline.radar.core.data.Alert
+import app.hookline.radar.core.data.Coverage
 import app.hookline.radar.core.data.Hazard
 import app.hookline.radar.core.data.LatLon
 import app.hookline.radar.core.data.LiveEvent
 import app.hookline.radar.core.data.LiveRadar
 import app.hookline.radar.core.data.LiveSnapshot
 import app.hookline.radar.core.data.LoopBackfill
+import app.hookline.radar.core.data.Network
 import app.hookline.radar.core.data.NexradSource
 import app.hookline.radar.core.data.NwsAlerts
+import app.hookline.radar.core.data.OperaComposite
+import app.hookline.radar.core.data.OrdKey
+import app.hookline.radar.core.data.OrdRadar
+import app.hookline.radar.core.data.OrdS3
 import app.hookline.radar.core.data.RadarSite
 import app.hookline.radar.core.data.Sites
 import app.hookline.radar.core.data.StormMotion
-import app.hookline.radar.core.data.Tilts
+import app.hookline.radar.core.odim.CompositeTile
+import app.hookline.radar.core.odim.Odim
 import app.hookline.radar.core.radar.CompactMoment
 import app.hookline.radar.core.radar.Gate
 import app.hookline.radar.core.radar.MercatorProjector
@@ -27,12 +34,11 @@ import app.hookline.radar.core.radar.Palette
 import app.hookline.radar.core.radar.Radial
 import app.hookline.radar.core.radar.RadialGeometry
 import app.hookline.radar.core.radar.StormRelative
-import app.hookline.radar.core.radar.Sweep
 import app.hookline.radar.core.radar.SweepTexture
-import app.hookline.radar.demo.DemoStorm
 import app.hookline.radar.render.Outline
-import app.hookline.radar.render.RadarFrame
+import app.hookline.radar.render.RasterLayer
 import app.hookline.radar.stormmode.AlertChecker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -50,8 +56,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.TimeZone
 import java.util.TreeMap
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 enum class Product(val label: String, val moment: Moment, val palette: Palette, val min: Float, val max: Float) {
@@ -67,9 +75,12 @@ sealed interface FeedStatus {
     data object Live : FeedStatus
     /** Showing the last good scan; [message] says why it's not updating. */
     data class Stale(val message: String) : FeedStatus
-    /** Never reached the feed; showing the synthetic demo storm. */
-    data class Demo(val message: String) : FeedStatus
+    /** Nothing open to show for this place. */
+    data class NoCoverage(val message: String) : FeedStatus
 }
+
+/** What the map is showing. */
+enum class Mode { SITE, COMPOSITE, NONE }
 
 /** Storm motion in use for SRV and where it came from. */
 data class MotionInfo(val fromDeg: Int, val speedKt: Int, val source: String)
@@ -80,31 +91,38 @@ data class LoopUi(
     /** Frame on screen; null = latest (live). */
     val index: Int? = null,
     val playing: Boolean = false,
-    /** Loops cover the lowest tilt for REF, VEL and SRV. */
     val available: Boolean = true,
     val loading: String? = null,
 )
 
+/** A one-shot request for the map camera (seq changes each time). */
+data class CameraTarget(val lat: Double, val lon: Double, val zoom: Double, val seq: Int)
+
 data class MapUiState(
-    val site: RadarSite = Sites.byId("KTLX")!!,
-    val sites: List<RadarSite> = Sites.ALL,
+    val mode: Mode = Mode.NONE,
+    val site: RadarSite? = null,
+    val autoSite: Boolean = true,
+    val nearbySites: List<Pair<RadarSite, Int>> = emptyList(),
     val product: Product = Product.REF,
-    val tilts: List<Float> = listOf(0.5f),
+    val tilts: List<Float> = emptyList(),
     val tilt: Float = 0.5f,
-    val availableProducts: Set<Product> = Product.entries.toSet(),
+    val availableProducts: Set<Product> = setOf(Product.REF),
     val frameEndMillis: Long? = null,
     val nowMillis: Long = System.currentTimeMillis(),
     val status: FeedStatus = FeedStatus.Connecting,
-    val frame: RadarFrame? = null,
-    val projector: MercatorProjector = MercatorProjector(35.333, -97.278),
+    val siteLayer: RasterLayer? = null,
+    val compositeLayer: RasterLayer? = null,
+    val origin: MercatorProjector = MercatorProjector(0.0, 0.0),
     val outlines: List<Outline> = emptyList(),
     val loop: LoopUi = LoopUi(),
     val motion: MotionInfo = DEFAULT_MOTION,
     val inspector: Inspection? = null,
     val homeWarning: Alert? = null,
-    val stormModeOn: Boolean = true,
+    val stormModeOn: Boolean = false,
     val intensity: MapIntensity = MapIntensity(),
     val loopLength: Int = 12,
+    val camera: CameraTarget? = null,
+    val attribution: String = "",
 ) {
     val frameAgeSeconds: Int? get() = frameEndMillis?.let { ((nowMillis - it) / 1000).toInt().coerceAtLeast(0) }
     val showingLatest: Boolean get() = loop.index == null
@@ -118,63 +136,187 @@ data class Inspection(val value: String, val meaning: String, val height: String
 
 class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("map", Context.MODE_PRIVATE)
+
+    private val http = OkHttpClient.Builder().callTimeout(45, TimeUnit.SECONDS).build()
+    private val nexrad = NexradSource(http)
+    private val live = LiveRadar(nexrad)
+    private val backfill = LoopBackfill(nexrad)
+    private val ordStore = OrdS3(http)
+    private val ord = OrdRadar(ordStore)
+    private val opera = OperaComposite(ordStore)
+    private val nws = NwsAlerts(http, BuildConfig.NWS_USER_AGENT)
+    private val checker = AlertChecker(app)
+
+    val offline = OfflineMaps(app)
+
+    private val startCamera: CameraTarget = initialCamera()
+
     private val _state = MutableStateFlow(
         MapUiState(
-            intensity = MapIntensity(
-                prefs.getFloat("roads", 0.7f), prefs.getFloat("labels", 0.8f), prefs.getFloat("borders", 0.6f),
-            ),
+            intensity = MapIntensity(prefs.getFloat("roads", 0.7f), prefs.getFloat("labels", 0.8f), prefs.getFloat("borders", 0.6f)),
             loopLength = prefs.getInt("loop_length", 12),
+            autoSite = prefs.getBoolean("auto_site", true),
+            // One render origin for the whole session: every layer is placed relative to it.
+            origin = MercatorProjector(startCamera.lat, startCamera.lon),
+            camera = startCamera,
+            stormModeOn = checker.places().isNotEmpty(),
         ),
     )
     val state: StateFlow<MapUiState> = _state.asStateFlow()
 
-    val offline = OfflineMaps(app)
-
-    private val http = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
-    private val nexrad = NexradSource(http)
-    private val live = LiveRadar(nexrad)
-    private val backfill = LoopBackfill(nexrad)
-    private val nws = NwsAlerts(http, BuildConfig.NWS_USER_AGENT)
-    private val checker = AlertChecker(app)
-
+    // live single-site
     private var snapshot: LiveSnapshot? = null
-    private var demoSnapshot: LiveSnapshot? = null
-    private var alerts: List<Alert> = emptyList()
-    private var mapCenter: LatLon? = null
+    private var siteLocation: LatLon? = null
+    private val wantedTilts = MutableStateFlow(emptySet<Float>())
     private var streamJob: Job? = null
     private var backfillJob: Job? = null
-    private var playJob: Job? = null
-    private var frameJob: Job? = null
     private var currentTexture: SweepTexture? = null
-
-    /** Loop buffers keyed by sweep end time. Compact: ~2–3 MB per frame. */
     private val refLoop = TreeMap<Long, CompactMoment>()
     private val velLoop = TreeMap<Long, CompactMoment>()
 
+    // composite
+    private var compositeJob: Job? = null
+    private var compositeGrid: Odim.Grid? = null
+    private var compositeLocator: CompositeTile.Locator? = null
+    private var compositeKey: OrdKey? = null
+    private var compositeBounds: DoubleArray? = null // s, w, n, e of the current tile
+    private var compositeZoom = 0.0
+    private val compositeBytes = TreeMap<Long, ByteArray>() // loop frames, compressed
+    private var compositeLoopLayers: Map<Long, RasterLayer> = emptyMap()
+    private var compositeKeys: List<OrdKey> = emptyList()
+
+    // map
+    private var mapCenter: LatLon = LatLon(startCamera.lat, startCamera.lon)
+    private var mapZoom = startCamera.zoom
+    private var visible: LatLngBounds? = null
+    private var alerts: List<Alert> = emptyList()
+    private var playJob: Job? = null
+    private var frameJob: Job? = null
+    private var compositeTileJob: Job? = null
+    private var cameraSeq = 1
+
     init {
-        startSite(_state.value.site)
         viewModelScope.launch { while (isActive) { _state.update { it.copy(nowMillis = System.currentTimeMillis()) }; delay(1_000) } }
-        viewModelScope.launch { while (isActive) { refreshAlerts(); delay(60_000) } }
+        viewModelScope.launch {
+            while (isActive) {
+                if (Coverage.inUs(mapCenter) || checker.places().isNotEmpty()) refreshAlerts()
+                delay(60_000)
+            }
+        }
     }
 
-    // ---- user actions -------------------------------------------------------
+    // ---- camera and location ------------------------------------------------------
 
-    fun selectSite(site: RadarSite) {
-        if (site.id == _state.value.site.id) return
+    private fun initialCamera(): CameraTarget {
+        if (prefs.contains("cam_lat")) {
+            return CameraTarget(prefs.getFloat("cam_lat", 0f).toDouble(), prefs.getFloat("cam_lon", 0f).toDouble(), prefs.getFloat("cam_zoom", 5f).toDouble(), 0)
+        }
+        val tz = TimeZone.getDefault().id
+        return when {
+            tz.startsWith("Europe/") -> CameraTarget(48.0, 12.0, 3.8, 0)
+            tz.startsWith("America/") || tz.startsWith("US/") || tz.startsWith("Pacific/Honolulu") -> CameraTarget(35.33, -97.28, 6.5, 0)
+            else -> CameraTarget(30.0, 10.0, 2.5, 0)
+        }
+    }
+
+    /** Device location, once permission is granted. Recentres only the first time. */
+    fun onLocation(lat: Double, lon: Double) {
+        val p = LatLon(lat, lon)
+        checker.setHome(if (Coverage.inUs(p)) p else null)
+        _state.update { it.copy(stormModeOn = checker.places().isNotEmpty()) }
+        if (!prefs.getBoolean("located_once", false)) {
+            prefs.edit().putBoolean("located_once", true).apply()
+            val zoom = if (Sites.nearest(p) != null) 7.0 else 5.5
+            _state.update { it.copy(camera = CameraTarget(lat, lon, zoom, ++cameraSeq)) }
+        }
+    }
+
+    fun onCameraIdle(center: LatLng, zoom: Double, bounds: LatLngBounds?) {
+        mapCenter = LatLon(center.latitude, center.longitude)
+        mapZoom = zoom
+        visible = bounds
+        prefs.edit().putFloat("cam_lat", center.latitude.toFloat()).putFloat("cam_lon", center.longitude.toFloat())
+            .putFloat("cam_zoom", zoom.toFloat()).apply()
+        _state.update { it.copy(nearbySites = Sites.byDistance(mapCenter).take(25).map { s -> s to Sites.distanceKm(mapCenter, s.location).roundToInt() }) }
+        decideSource()
+        if (_state.value.mode == Mode.COMPOSITE) refreshCompositeTile(force = false)
+        val before = _state.value.motion
+        chooseMotion()
+        if (_state.value.motion != before && _state.value.product == Product.SRV) showCurrent()
+    }
+
+    /**
+     * Picks what to show for the current view:
+     * - zoomed in near an open radar: that radar (auto mode), or the user's pick;
+     * - otherwise inside Europe: the OPERA composite;
+     * - otherwise: nothing, and say so.
+     */
+    private fun decideSource() {
+        val s = _state.value
+        val inEurope = Coverage.inOperaComposite(mapCenter)
+        if (!s.autoSite && s.site != null) {
+            if (s.mode != Mode.SITE) setMode(Mode.SITE)
+            return
+        }
+        val nearest = if (mapZoom >= SITE_ZOOM) Sites.nearest(mapCenter, 230.0) else null
+        when {
+            nearest != null -> {
+                if (nearest.id != s.site?.id) startSite(nearest)
+                if (s.mode != Mode.SITE) setMode(Mode.SITE)
+            }
+            inEurope -> {
+                if (s.site != null) stopSite()
+                if (s.mode != Mode.COMPOSITE) setMode(Mode.COMPOSITE)
+            }
+            s.site != null && Sites.distanceKm(mapCenter, s.site.location) < 600 -> Unit // keep the last radar nearby
+            else -> {
+                if (s.site != null) stopSite()
+                setMode(Mode.NONE)
+            }
+        }
+    }
+
+    private fun setMode(mode: Mode) {
         stopLoop()
-        backfillJob?.cancel()
-        refLoop.clear(); velLoop.clear()
-        snapshot = null
-        currentTexture = null
         _state.update {
-            MapUiState(
-                site = site, product = it.product, stormModeOn = it.stormModeOn,
-                intensity = it.intensity, loopLength = it.loopLength,
-                projector = MercatorProjector(site.location.lat, site.location.lon),
+            it.copy(
+                mode = mode,
+                loop = LoopUi(),
+                inspector = null,
+                compositeLayer = if (mode == Mode.COMPOSITE) it.compositeLayer else null,
+                siteLayer = if (mode == Mode.SITE) it.siteLayer else null,
+                status = when (mode) {
+                    Mode.NONE -> FeedStatus.NoCoverage("No open radar data for this area")
+                    else -> it.status
+                },
+                attribution = attributionFor(mode, it.site),
             )
         }
-        startSite(site)
-        rebuildOverlays()
+        if (mode == Mode.COMPOSITE) startComposite() else stopComposite()
+        if (mode == Mode.COMPOSITE) refreshLoopUi()
+    }
+
+    private fun attributionFor(mode: Mode, site: RadarSite?): String = when {
+        mode == Mode.COMPOSITE -> "Radar: EUMETNET OPERA (CC BY 4.0)"
+        site?.network == Network.OPERA -> "Radar: EUMETNET OPERA, ${site.name.substringAfterLast(", ")} (CC BY 4.0)"
+        mode == Mode.SITE -> "Radar and warnings: NOAA / NWS"
+        else -> ""
+    }
+
+    // ---- user actions ---------------------------------------------------------------
+
+    /** Pick a radar from the list (manual mode) and fly to it. */
+    fun selectSite(site: RadarSite) {
+        prefs.edit().putBoolean("auto_site", false).apply()
+        _state.update { it.copy(autoSite = false, camera = CameraTarget(site.location.lat, site.location.lon, 7.0, ++cameraSeq)) }
+        if (site.id != _state.value.site?.id) startSite(site)
+        setMode(Mode.SITE)
+    }
+
+    fun setAutoSite() {
+        prefs.edit().putBoolean("auto_site", true).apply()
+        _state.update { it.copy(autoSite = true) }
+        decideSource()
     }
 
     fun selectProduct(p: Product) {
@@ -185,6 +327,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectTilt(t: Float) {
         _state.update { it.copy(tilt = t, inspector = null) }
+        wantedTilts.value = setOf(t)
         refreshLoopUi()
         showCurrent()
     }
@@ -215,39 +358,66 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(loopLength = n) }
     }
 
-    fun onCameraIdle(center: LatLng) {
-        mapCenter = LatLon(center.latitude, center.longitude)
-        val before = _state.value.motion
-        chooseMotion()
-        if (_state.value.motion != before && _state.value.product == Product.SRV) showCurrent()
-    }
-
     fun inspect(at: LatLng) {
-        val tex = currentTexture ?: return
-        val p = _state.value.projector
-        val (brg, dist) = MercatorProjector.bearingDistance(p.siteLat, p.siteLon, at.latitude, at.longitude)
-        val v = tex.valueAtPolar(brg, dist)
-        val heightFt = RadialGeometry.beamHeightMeters(dist, tex.elevationDeg.toDouble()) * 3.281
-        val height = "%,d ft above the radar, %.0f mi out".format(Locale.US, (heightFt / 10).roundToInt() * 10, dist / 1609.34)
-        _state.update { it.copy(inspector = describe(it.product, v, height)) }
+        val s = _state.value
+        if (s.mode == Mode.SITE) {
+            val tex = currentTexture ?: return
+            val loc = siteLocation ?: return
+            val (brg, dist) = MercatorProjector.bearingDistance(loc.lat, loc.lon, at.latitude, at.longitude)
+            val v = tex.valueAtPolar(brg, dist)
+            val heightFt = RadialGeometry.beamHeightMeters(dist, tex.elevationDeg.toDouble()) * 3.281
+            val height = "%,d ft above the radar, %.0f mi out".format(Locale.US, (heightFt / 10).roundToInt() * 10, dist / 1609.34)
+            _state.update { it.copy(inspector = describe(it.product, v, height)) }
+        } else if (s.mode == Mode.COMPOSITE) {
+            val g = compositeGrid ?: return
+            val loc = compositeLocator ?: return
+            val v = CompositeTile.valueAt(g, loc, at.latitude, at.longitude)
+            val inspection = if (v.isNaN()) {
+                Inspection("No data", "This spot isn't covered by the European radar network.", "Europe composite")
+            } else {
+                describe(Product.REF, if (v.isInfinite()) null else v, "Highest echo above this spot, from all nearby radars")
+            }
+            _state.update { it.copy(inspector = inspection) }
+        }
     }
 
     fun downloadVisibleMap(bounds: LatLngBounds, pixelRatio: Float) {
-        offline.download(bounds, "${_state.value.site.name} area", pixelRatio)
+        offline.download(bounds, _state.value.site?.name?.let { "$it area" } ?: "Saved area", pixelRatio)
     }
 
-    // ---- live data ----------------------------------------------------------
+    // ---- single-site radar ------------------------------------------------------------------
+
+    private fun stopSite() {
+        streamJob?.cancel(); backfillJob?.cancel()
+        snapshot = null
+        currentTexture = null
+        refLoop.clear(); velLoop.clear()
+        _state.update { it.copy(site = null, siteLayer = null, tilts = emptyList(), outlines = emptyList()) }
+    }
 
     private fun startSite(site: RadarSite) {
-        streamJob?.cancel()
+        stopLoop()
+        streamJob?.cancel(); backfillJob?.cancel()
+        snapshot = null
+        currentTexture = null
+        refLoop.clear(); velLoop.clear()
+        siteLocation = site.location
+        wantedTilts.value = emptySet()
+        _state.update {
+            it.copy(
+                site = site, siteLayer = null, tilts = emptyList(), tilt = 0f, loop = LoopUi(),
+                status = FeedStatus.Connecting, frameEndMillis = null, inspector = null,
+                attribution = attributionFor(Mode.SITE, site),
+            )
+        }
+        rebuildOverlays()
         streamJob = viewModelScope.launch {
-            live.stream(site.id).collect { e ->
+            val events = if (site.network == Network.OPERA) ord.stream(site, wantedTilts) else live.stream(site.id)
+            events.collect { e ->
                 when (e) {
                     is LiveEvent.Data -> onLiveData(site, e)
-                    is LiveEvent.Trouble -> {
-                        val firstData = snapshot == null
-                        _state.update { s -> s.copy(status = if (firstData) FeedStatus.Demo(e.message) else FeedStatus.Stale(e.message)) }
-                        if (firstData && _state.value.frame == null) showDemo()
+                    is LiveEvent.Trouble -> _state.update { s ->
+                        s.copy(status = if (snapshot == null) FeedStatus.Stale("${site.name}: ${e.message}") else FeedStatus.Stale(e.message))
                     }
                 }
             }
@@ -257,36 +427,43 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun onLiveData(site: RadarSite, e: LiveEvent.Data) {
         val first = snapshot == null
         snapshot = e.snapshot
-        demoSnapshot = null
-        val radarSite = e.snapshot.site
+        e.snapshot.site?.let { siteLocation = LatLon(it.latitude.toDouble(), it.longitude.toDouble()) }
         _state.update { s ->
             val tilts = e.snapshot.tilts
             s.copy(
                 status = FeedStatus.Live,
                 tilts = tilts,
                 tilt = if (s.tilt in tilts) s.tilt else tilts.firstOrNull() ?: s.tilt,
-                projector = if (radarSite != null && (first || s.projector.siteLat != radarSite.latitude.toDouble())) {
-                    MercatorProjector(radarSite.latitude.toDouble(), radarSite.longitude.toDouble())
-                } else s.projector,
             )
         }
         if (first) rebuildOverlays()
-        addToLoop(e.snapshot.sweep(LoopBackfill.LOOP_TILT, Moment.REFLECTIVITY), e.snapshot.sweep(LoopBackfill.LOOP_TILT, Moment.VELOCITY))
-        if (first) startBackfill(site.id, e.volume)
+        val lt = loopTilt()
+        addToLoop(e.snapshot.sweep(lt, Moment.REFLECTIVITY), e.snapshot.sweep(lt, Moment.VELOCITY))
+        if (first) startBackfill(site, e.volume)
         if (_state.value.showingLatest) showCurrent()
     }
 
-    private fun startBackfill(siteId: String, volume: Int) {
+    /** Loops use the lowest tilt (0.5 deg for NEXRAD; it varies in Europe). */
+    private fun loopTilt(): Float = snapshot?.tilts?.firstOrNull() ?: LoopBackfill.LOOP_TILT
+
+    private fun startBackfill(site: RadarSite, volume: Int) {
         backfillJob?.cancel()
         val wanted = _state.value.loopLength
         if (wanted <= 1) return
         backfillJob = viewModelScope.launch {
             var got = 0
             setLoopLoading("Loading loop…")
-            backfill.frames(siteId, volume, wanted - 1).collect { f ->
-                got++
-                addToLoop(f.reflectivity, f.velocity)
-                setLoopLoading("Loading loop $got/${wanted - 1}")
+            try {
+                val frames = if (site.network == Network.OPERA) ord.loopFrames(site, wanted - 1) else backfill.frames(site.id, volume, wanted - 1)
+                frames.collect { f ->
+                    got++
+                    addToLoop(f.reflectivity, f.velocity)
+                    setLoopLoading("Loading loop $got/${wanted - 1}")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Loops are a nice-to-have; the live view carries on.
             }
             setLoopLoading(null)
         }
@@ -294,11 +471,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun setLoopLoading(text: String?) = _state.update { it.copy(loop = it.loop.copy(loading = text)) }
 
-    private suspend fun addToLoop(ref: Sweep?, vel: Sweep?) {
+    private suspend fun addToLoop(ref: app.hookline.radar.core.radar.Sweep?, vel: app.hookline.radar.core.radar.Sweep?) {
         val (r, v) = withContext(Dispatchers.Default) {
             ref?.let { CompactMoment.from(it, Moment.REFLECTIVITY) } to vel?.let { CompactMoment.from(it, Moment.VELOCITY) }
         }
-        val cap = _state.value.loopLength.coerceAtLeast(2) + 4 // live frames keep arriving
+        val cap = _state.value.loopLength.coerceAtLeast(2) + 4
         r?.let { refLoop[it.endMillis] = it; while (refLoop.size > cap) refLoop.pollFirstEntry() }
         v?.let { velLoop[it.endMillis] = it; while (velLoop.size > cap) velLoop.pollFirstEntry() }
         refreshLoopUi()
@@ -310,9 +487,120 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         else -> null
     }
 
+    // ---- composite ------------------------------------------------------------------------------
+
+    private fun startComposite() {
+        if (compositeJob?.isActive == true) return
+        compositeJob = viewModelScope.launch {
+            var attempt = 0
+            while (isActive) {
+                try {
+                    val keys = opera.latestKeys(_state.value.loopLength.coerceIn(2, 12))
+                    val newest = keys.firstOrNull()
+                    if (newest == null) {
+                        if (compositeGrid == null) _state.update { it.copy(status = FeedStatus.Stale("No recent European composite")) }
+                    } else if (newest.key != compositeKey?.key) {
+                        val bytes = opera.fetchBytes(newest)
+                        val grid = withContext(Dispatchers.Default) { OperaComposite.decode(bytes) }
+                        compositeGrid = grid
+                        compositeLocator = withContext(Dispatchers.Default) { CompositeTile.Locator(grid) }
+                        compositeKey = newest
+                        compositeBytes[newest.timeMillis] = bytes
+                        // Remember the other recent frames' keys for loops (downloaded on play).
+                        compositeKeys = keys
+                        while (compositeBytes.size > 12) compositeBytes.pollFirstEntry()
+                        _state.update { it.copy(status = FeedStatus.Live) }
+                        refreshCompositeTile(force = true)
+                        refreshLoopUi()
+                    }
+                    attempt = 0
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    attempt++
+                    _state.update { it.copy(status = FeedStatus.Stale(e.message ?: "Can't reach European radar data")) }
+                }
+                delay(if (attempt == 0) 120_000L else (15_000L * attempt).coerceAtMost(120_000L))
+            }
+        }
+    }
+
+    private fun stopComposite() {
+        compositeJob?.cancel()
+        compositeJob = null
+        compositeLoopLayers = emptyMap()
+    }
+
+    /** Rebuilds the composite texture for the visible area when the view moved off it or zoomed a lot. */
+    private fun refreshCompositeTile(force: Boolean) {
+        val grid = compositeGrid ?: return
+        val loc = compositeLocator ?: return
+        val b = visible ?: return
+        val s = b.latitudeSouth; val n = b.latitudeNorth; val w = b.longitudeWest; val e = b.longitudeEast
+        val cur = compositeBounds
+        val covered = cur != null && s >= cur[0] && w >= cur[1] && n <= cur[2] && e <= cur[3]
+        if (!force && covered && abs(mapZoom - compositeZoom) < 1.5) return
+        if (_state.value.loop.playing) {
+            // Loop frames were cut for the old view; stop rather than show a stale area.
+            playJob?.cancel(); playJob = null
+            _state.update { it.copy(loop = it.loop.copy(playing = false, index = null)) }
+        }
+        // Pad by half a screen each way so small pans don't trigger rebuilds.
+        val dLat = (n - s) * 0.5; val dLon = (e - w) * 0.5
+        val box = doubleArrayOf((s - dLat).coerceAtLeast(-85.0), w - dLon, (n + dLat).coerceAtMost(85.0), e + dLon)
+        val origin = _state.value.origin
+        compositeTileJob?.cancel()
+        compositeTileJob = viewModelScope.launch {
+            val layer = withContext(Dispatchers.Default) {
+                CompositeTile.build(grid, loc, box[0], box[1], box[2], box[3], 2048, origin.siteLat, origin.siteLon, true)
+                    ?.let { compositeLayer(it) }
+            }
+            compositeBounds = box
+            compositeZoom = mapZoom
+            compositeLoopLayers = emptyMap()
+            if (_state.value.mode == Mode.COMPOSITE && _state.value.showingLatest) {
+                _state.update { it.copy(compositeLayer = layer, frameEndMillis = grid.endMillis) }
+            }
+        }
+    }
+
+    private fun compositeLayer(t: CompositeTile) = RasterLayer(
+        t.texWidth, t.texHeight, t.values, t.mesh, Product.REF.palette, Product.REF.min, Product.REF.max,
+    )
+
+    /** Download and prepare the composite loop for the current view. */
+    private suspend fun prepareCompositeLoop(): Boolean {
+        val loc = compositeLocator ?: return false
+        val box = compositeBounds ?: return false
+        val origin = _state.value.origin
+        val keys = compositeKeys.sortedBy { it.timeMillis }
+        if (keys.size < 2) return false
+        val layers = HashMap<Long, RasterLayer>()
+        for ((i, k) in keys.withIndex()) {
+            setLoopLoading("Loading loop ${i + 1}/${keys.size}")
+            val bytes = compositeBytes[k.timeMillis] ?: opera.fetchBytes(k).also { compositeBytes[k.timeMillis] = it }
+            val layer = withContext(Dispatchers.Default) {
+                val g = OperaComposite.decode(bytes)
+                CompositeTile.build(g, loc, box[0], box[1], box[2], box[3], 1024, origin.siteLat, origin.siteLon, true)?.let { compositeLayer(it) }
+            } ?: continue
+            layers[k.timeMillis] = layer
+        }
+        setLoopLoading(null)
+        compositeLoopLayers = layers
+        _state.update { it.copy(loop = it.loop.copy(frames = layers.keys.sorted())) }
+        return layers.size >= 2
+    }
+
+    // ---- loops (both modes) -------------------------------------------------------------------------
+
     private fun refreshLoopUi() {
         val s = _state.value
-        val buffer = if (s.tilt == LoopBackfill.LOOP_TILT) loopFor(s.product) else null
+        if (s.mode == Mode.COMPOSITE) {
+            val frames = compositeKeys.map { it.timeMillis }.sorted()
+            _state.update { it.copy(loop = it.loop.copy(frames = frames, available = frames.size >= 2), availableProducts = setOf(Product.REF)) }
+            return
+        }
+        val buffer = if (s.tilt == loopTilt()) loopFor(s.product) else null
         val frames = buffer?.keys?.toList().orEmpty()
         _state.update {
             val idx = it.loop.index?.takeIf { i -> i < frames.size - 1 }
@@ -323,35 +611,61 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startLoop() {
         playJob?.cancel()
-        _state.update { it.copy(loop = it.loop.copy(playing = true, index = 0)) }
+        _state.update { it.copy(loop = it.loop.copy(playing = true)) }
         playJob = viewModelScope.launch {
+            if (_state.value.mode == Mode.COMPOSITE && compositeLoopLayers.size < 2) {
+                if (!prepareCompositeLoop()) { stopLoop(); return@launch }
+            }
+            _state.update { it.copy(loop = it.loop.copy(index = 0)) }
+            showCurrent()
             while (isActive) {
                 val l = _state.value.loop
                 val n = l.frames.size
                 if (n < 2) break
-                val next = ((l.index ?: (n - 1)) + 1) % n
+                val cur = l.index ?: (n - 1)
+                // Dwell on the newest frame so the eye can find "now".
+                delay(if (l.index == null) 1_500 else 300)
+                val next = (cur + 1) % n
                 _state.update { it.copy(loop = it.loop.copy(index = if (next == n - 1) null else next)) }
                 showCurrent()
-                // Dwell on the newest frame so the eye can find "now".
-                delay(if (next == n - 1) 1_500 else 300)
             }
         }
     }
 
     private fun stopLoop() {
+        val wasPlaying = _state.value.loop.playing
         playJob?.cancel(); playJob = null
         _state.update { it.copy(loop = it.loop.copy(playing = false)) }
+        // Back on "latest" in composite mode: swap the loop's lower-resolution frame for full resolution.
+        if (wasPlaying && _state.value.mode == Mode.COMPOSITE && _state.value.showingLatest) refreshCompositeTile(force = true)
     }
 
-    /** Builds the GPU frame for whatever the user has selected: a loop frame or the latest sweep. */
+    // ---- building what's on screen -----------------------------------------------------------------
+
     private fun showCurrent() {
         val s = _state.value
+        if (s.mode == Mode.COMPOSITE) {
+            val idx = s.loop.index
+            if (idx == null) {
+                val lastKey = s.loop.frames.lastOrNull()
+                val last = lastKey?.let { compositeLoopLayers[it] }
+                if (s.loop.playing && last != null) _state.update { it.copy(compositeLayer = last, frameEndMillis = lastKey) }
+                else refreshCompositeTile(force = true)
+            } else {
+                val key = s.loop.frames.getOrNull(idx) ?: return
+                val layer = compositeLoopLayers[key] ?: return
+                _state.update { it.copy(compositeLayer = layer, frameEndMillis = key) }
+            }
+            return
+        }
+        if (s.mode != Mode.SITE) return
+        val loc = siteLocation ?: return
         val idx = s.loop.index
         val buffer = loopFor(s.product)
         if (idx != null && s.loop.available && buffer != null) {
             val key = s.loop.frames.getOrNull(idx) ?: return
             val compact = buffer[key] ?: return
-            render(s.product, s.projector, isDemo = false) {
+            render(s.product, s.origin, loc) {
                 if (s.product == Product.SRV) {
                     val m = s.motion
                     compact.toTexture { az, v -> v - StormRelative.component(az, m.fromDeg.toFloat(), m.speedKt * 0.514444f) }
@@ -359,16 +673,15 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
             return
         }
-        val snap = snapshot ?: demoSnapshot ?: return
-        val isDemo = snapshot == null
+        val snap = snapshot ?: return
         val available = Product.entries.filter { snap.sweep(s.tilt, it.moment) != null }.toSet()
         val product = if (s.product in available || available.isEmpty()) s.product else Product.REF
         if (product != s.product || available != s.availableProducts) {
-            _state.update { it.copy(product = product, availableProducts = available) }
+            _state.update { it.copy(product = product, availableProducts = available.ifEmpty { setOf(Product.REF) }) }
         }
-        val sweep = snap.sweep(s.tilt, product.moment) ?: return
+        val sweep = snap.sweep(s.tilt, product.moment) ?: return // tilt still downloading
         val motion = s.motion
-        render(product, s.projector, isDemo) {
+        render(product, s.origin, loc) {
             val srv: ((Radial, MomentData) -> MomentData)? = if (product == Product.SRV) {
                 { r, md -> StormRelative.apply(r, motion.fromDeg.toFloat(), motion.speedKt * 0.514444f) ?: md }
             } else null
@@ -376,41 +689,22 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun render(product: Product, projector: MercatorProjector, isDemo: Boolean, build: () -> SweepTexture?) {
+    private fun render(product: Product, origin: MercatorProjector, radar: LatLon, build: () -> SweepTexture?) {
         frameJob?.cancel()
         frameJob = viewModelScope.launch {
-            val tex = withContext(Dispatchers.Default) { build() } ?: return@launch
-            currentTexture = tex
-            _state.update {
-                it.copy(
-                    frame = RadarFrame(tex, product.palette, product.min, product.max, projector),
-                    frameEndMillis = if (isDemo) System.currentTimeMillis() - 48_000 else tex.endMillis,
+            val built = withContext(Dispatchers.Default) {
+                val tex = build() ?: return@withContext null
+                tex to RasterLayer(
+                    tex.gateCount, tex.radialCount, tex.values, tex.wedgeMesh(origin, radar.lat, radar.lon),
+                    product.palette, product.min, product.max,
                 )
-            }
+            } ?: return@launch
+            currentTexture = built.first
+            _state.update { it.copy(siteLayer = built.second, frameEndMillis = built.first.endMillis) }
         }
     }
 
-    /** Offline / first-run fallback: a synthetic supercell, clearly labelled as such. */
-    private fun showDemo() {
-        viewModelScope.launch {
-            val demo = withContext(Dispatchers.Default) { DemoStorm.sweep() }
-            if (snapshot != null) return@launch
-            val site = demo.radials.first().site
-            demoSnapshot = LiveSnapshot(
-                radarId = "DEMO", site = site,
-                sweeps = mapOf((0.5f to Moment.REFLECTIVITY) to demo, (0.5f to Moment.VELOCITY) to demo),
-            )
-            _state.update {
-                it.copy(
-                    tilts = listOf(0.5f), tilt = 0.5f,
-                    projector = if (site != null) MercatorProjector(site.latitude.toDouble(), site.longitude.toDouble()) else it.projector,
-                )
-            }
-            showCurrent()
-        }
-    }
-
-    // ---- warnings, storm motion, tracks ------------------------------------
+    // ---- warnings, storm motion, tracks, rings ------------------------------------------------------
 
     private suspend fun refreshAlerts() {
         alerts = runCatching {
@@ -425,33 +719,41 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * SRV needs the storm's own motion. Use the NWS warning closest to where
-     * the user is looking (within the radar's range); else the default, and
-     * say so on screen.
+     * the user is looking (within the radar's range); else a default, and say so.
      */
     private fun chooseMotion() {
-        val p = _state.value.projector
-        val focus = mapCenter ?: LatLon(p.siteLat, p.siteLon)
-        val candidates = alerts.mapNotNull { a -> a.motion?.takeIf { it.positions.isNotEmpty() }?.let { a to it } }
+        val site = siteLocation ?: mapCenter
+        val focus = mapCenter
+        val best = alerts.mapNotNull { a -> a.motion?.takeIf { it.positions.isNotEmpty() }?.let { a to it } }
             .map { (a, m) ->
                 val pos = m.positions.first()
-                val fromSite = MercatorProjector.bearingDistance(p.siteLat, p.siteLon, pos.lat, pos.lon).second
+                val fromSite = MercatorProjector.bearingDistance(site.lat, site.lon, pos.lat, pos.lon).second
                 val fromFocus = MercatorProjector.bearingDistance(focus.lat, focus.lon, pos.lat, pos.lon).second
                 Triple(a, m, fromSite to fromFocus)
             }
             .filter { it.third.first < 230_000 }
-        val best = candidates.minByOrNull { it.third.second }
+            .minByOrNull { it.third.second }
         _state.update {
-            it.copy(
-                motion = best?.let { (a, m, _) -> MotionInfo(m.fromDeg, m.speedKt, "From the ${a.event.lowercase()}") }
-                    ?: MapUiState.DEFAULT_MOTION,
-            )
+            it.copy(motion = best?.let { (a, m, _) -> MotionInfo(m.fromDeg, m.speedKt, "From the ${a.event.lowercase()}") } ?: MapUiState.DEFAULT_MOTION)
         }
     }
 
     private fun rebuildOverlays() {
-        val p = _state.value.projector
-        fun project(ll: LatLon): Pair<Float, Float> = p.fromLatLon(ll.lat, ll.lon).let { it.first.toFloat() to it.second.toFloat() }
+        val o = _state.value.origin
         val list = mutableListOf<Outline>()
+        // Range rings every 50 km around the radar.
+        if (_state.value.site != null) {
+            siteLocation?.let { r ->
+                for (k in 1..5) {
+                    val pts = FloatArray(RING_SEGMENTS * 2)
+                    for (i in 0 until RING_SEGMENTS) {
+                        val (x, y) = o.fromPolarAt(r.lat, r.lon, 360.0 * i / RING_SEGMENTS, k * 50_000.0)
+                        pts[i * 2] = x.toFloat(); pts[i * 2 + 1] = y.toFloat()
+                    }
+                    list += Outline(pts, 0x553A4652, 1.5f)
+                }
+            }
+        }
         for (a in alerts) {
             val (argb, width) = when (a.hazard) {
                 Hazard.TORNADO_EMERGENCY -> 0xFFB000B0.toInt() to 4f
@@ -462,10 +764,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
             for (ring in a.polygons) {
                 val pts = FloatArray(ring.size * 2)
-                ring.forEachIndexed { i, ll -> val (x, y) = project(ll); pts[i * 2] = x; pts[i * 2 + 1] = y }
+                ring.forEachIndexed { i, ll ->
+                    val (x, y) = o.fromLatLon(ll.lat, ll.lon)
+                    pts[i * 2] = x.toFloat(); pts[i * 2 + 1] = y.toFloat()
+                }
                 list += Outline(pts, argb, width)
             }
-            a.motion?.let { list += stormTrack(it, p) }
+            a.motion?.let { list += stormTrack(it, o) }
         }
         _state.update { it.copy(outlines = list) }
     }
@@ -482,11 +787,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 val (x, y) = p.fromLatLon(lat, lon)
                 path[k * 2] = x.toFloat(); path[k * 2 + 1] = y.toFloat()
                 if (minutes > 0) {
-                    // small diamond mark
-                    val r = 1_200.0
                     val mark = FloatArray(8)
                     for ((j, b) in listOf(0.0, 90.0, 180.0, 270.0).withIndex()) {
-                        val (la, lo) = RadialGeometry.destination(lat, lon, b, r)
+                        val (la, lo) = RadialGeometry.destination(lat, lon, b, 1_200.0)
                         val (mx, my) = p.fromLatLon(la, lo)
                         mark[j * 2] = mx.toFloat(); mark[j * 2 + 1] = my.toFloat()
                     }
@@ -498,7 +801,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         return out
     }
 
-    // ---- inspector wording --------------------------------------------------
+    // ---- inspector wording -----------------------------------------------------------------------------
 
     private fun describe(p: Product, v: Float?, height: String): Inspection {
         if (v == null) return Inspection("No echo", "Nothing above the radar's detection threshold here.", height)
@@ -513,12 +816,12 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     v < 40 -> "Moderate rain."
                     v < 50 -> "Heavy rain."
                     v < 60 -> "Very heavy rain; hail possible."
-                    else -> "Hail likely. Check CC: a drop below 0.9 here supports hail."
+                    else -> "Hail likely."
                 },
                 height,
             )
             Product.VEL, Product.SRV -> {
-                val kt = (kotlin.math.abs(v) * 1.944f).roundToInt()
+                val kt = (abs(v) * 1.944f).roundToInt()
                 val dir = if (v < 0) "toward the radar" else "away from the radar"
                 Inspection(
                     "$kt kt $dir",
@@ -549,6 +852,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        /** Zoom at which the map switches from the composite to the nearest single radar. */
+        const val SITE_ZOOM = 6.0
+        private const val RING_SEGMENTS = 120
         private val TIME = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
         fun clock(millis: Long): String = TIME.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))
     }

@@ -81,8 +81,10 @@ data class LiveSnapshot(
     val radarId: String?,
     val site: SiteLocation?,
     val sweeps: Map<Pair<Float, Moment>, Sweep>,
+    /** Tilts the radar has published but that aren't downloaded yet (loaded on demand). */
+    val listedTilts: List<Float> = emptyList(),
 ) {
-    val tilts: List<Float> get() = sweeps.keys.map { it.first }.distinct().sorted()
+    val tilts: List<Float> get() = (sweeps.keys.map { it.first } + listedTilts).distinct().sorted()
     fun sweep(tilt: Float, moment: Moment): Sweep? = sweeps[tilt to moment]
     fun moments(tilt: Float): Set<Moment> = sweeps.keys.filter { it.first == tilt }.map { it.second }.toSet()
 }
