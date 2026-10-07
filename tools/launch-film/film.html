@@ -1,0 +1,528 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:IT;font-weight:500;src:url(assets/inter-tight-latin-500-normal.woff2)}
+@font-face{font-family:IT;font-weight:600;src:url(assets/inter-tight-latin-600-normal.woff2)}
+@font-face{font-family:IT;font-weight:700;src:url(assets/inter-tight-latin-700-normal.woff2)}
+@font-face{font-family:PM;font-weight:400;src:url(assets/ibm-plex-mono-latin-400-normal.woff2)}
+@font-face{font-family:PM;font-weight:500;src:url(assets/ibm-plex-mono-latin-500-normal.woff2)}
+:root{--bg:#0A0E12;--void:#141B22;--chrome:rgba(28,37,46,.92);--raised:#26313C;--ink:#ECE8DF;--ink2:#9AA5AE;--hair:#3A4652;--red:#E4472F}
+html,body{margin:0;background:var(--bg)}
+#stage{position:relative;width:1920px;height:1080px;overflow:hidden;background:var(--bg);font-family:IT;color:var(--ink)}
+.abs{position:absolute;left:0;top:0}
+canvas{display:block}
+.mono{font-family:PM;letter-spacing:.14em;text-transform:uppercase}
+.line{overflow:hidden;display:block;padding-bottom:.08em}
+.w{display:inline-block;will-change:transform}
+/* scene 1/2 type */
+#s1t,#s2t{left:120px;top:150px;font-weight:600;font-size:92px;line-height:1.02;letter-spacing:-.025em;width:900px}
+#s1k,#s2k{left:124px;top:120px;font-size:20px;color:var(--ink2)}
+.callout{font-size:18px;color:var(--ink);line-height:1.5}
+.callout b{display:block;font-weight:500;color:var(--ink2);font-size:15px}
+/* logo */
+#logo{left:0;top:0;width:1920px;height:1080px}
+#word{position:absolute;font-weight:600;font-size:150px;letter-spacing:-.035em;line-height:1}
+#tag{position:absolute;font-size:24px;color:var(--ink2)}
+/* phone */
+#phoneWrap{left:300px;top:110px;width:440px;height:900px;perspective:1600px}
+#phone{position:absolute;inset:0;border-radius:64px;background:#05080B;box-shadow:0 0 0 2px #2A333C inset,0 50px 120px rgba(0,0,0,.6),0 0 0 1px #0E1318;transform-origin:50% 60%}
+#screen{position:absolute;left:14px;top:14px;width:412px;height:872px;border-radius:52px;overflow:hidden;background:var(--void)}
+#pc{position:absolute;left:0;top:0;width:412px;height:872px}
+.chip{position:absolute;background:var(--chrome);border-radius:16px;box-shadow:0 0 0 1px rgba(58,70,82,.6) inset}
+.cap{font-size:12.5px;color:var(--ink2);font-weight:500}
+.pill{display:flex;align-items:center;justify-content:center;height:36px;border-radius:18px;font-size:14px;font-weight:500;color:var(--ink);box-shadow:0 0 0 1px var(--hair) inset}
+.pill.sel{background:var(--ink);color:var(--void);box-shadow:none}
+#dock{position:absolute;left:0;right:0;bottom:0;height:206px;background:rgba(20,27,34,.95);padding:14px 16px 0;box-sizing:border-box}
+#notif{position:absolute;left:12px;right:12px;top:12px;height:92px;border-radius:24px;background:#26313C;box-shadow:0 12px 30px rgba(0,0,0,.5);display:flex;gap:12px;padding:14px 16px;box-sizing:border-box}
+#xsec{position:absolute;left:12px;right:12px;bottom:12px;height:180px;border-radius:20px;background:#1C252E;box-shadow:0 0 0 1px var(--hair) inset;padding:12px 14px;box-sizing:border-box}
+/* features */
+#feat{left:860px;top:250px;width:980px}
+.fi{position:absolute;left:0;top:0;width:980px}
+.fk{font-size:20px;color:var(--red)}
+.fh{font-weight:600;font-size:84px;line-height:1.02;letter-spacing:-.03em;margin-top:22px}
+.fs{font-size:20px;color:var(--ink2);margin-top:28px}
+#sites{left:860px;top:600px}
+/* promise + end */
+#s5{left:160px;top:250px;font-weight:600;font-size:132px;line-height:1.08;letter-spacing:-.035em}
+#endTag{position:absolute;left:0;width:1920px;text-align:center;font-size:40px;color:var(--ink);letter-spacing:-.01em}
+#endFoot{position:absolute;left:0;width:1920px;text-align:center;font-size:18px;color:var(--ink2)}
+#corner{left:72px;top:60px}
+#grain{left:0;top:0;width:1920px;height:1080px;mix-blend-mode:overlay;opacity:.07;pointer-events:none}
+#vig{left:0;top:0;width:1920px;height:1080px;pointer-events:none;background:radial-gradient(ellipse at 50% 50%,rgba(0,0,0,0) 55%,rgba(0,0,0,.55) 100%)}
+</style></head>
+<body>
+<div id="stage">
+  <canvas id="radar" class="abs" width="1920" height="1080"></canvas>
+  <svg id="ov" class="abs" width="1920" height="1080"></svg>
+
+  <div id="s1k" class="abs mono">KTLX · 0.5° · Reflectivity</div>
+  <div id="s1t" class="abs"><span class="line"><span class="w">This</span> <span class="w">is</span> <span class="w">a</span></span><span class="line"><span class="w">hook</span> <span class="w">echo.</span></span></div>
+  <div id="s2k" class="abs mono">KTLX · 0.5° · Velocity</div>
+  <div id="s2t" class="abs"><span class="line"><span class="w">And</span> <span class="w">this</span> <span class="w">is</span> <span class="w">the</span></span><span class="line"><span class="w">spin</span> <span class="w">inside</span> <span class="w">it.</span></span></div>
+
+  <div id="logo" class="abs">
+    <svg id="mark" viewBox="0 0 200 200" width="300" height="300" style="position:absolute;overflow:visible">
+      <g transform="translate(16 0) skewX(-9)"><g transform="translate(4 0)">
+        <rect id="mL" x="36" y="32" width="28" height="136" fill="#E8E4DA"/>
+        <rect id="mC" x="60" y="84" width="74" height="26" fill="#E8E4DA"/>
+        <path id="mH" d="M142 32 V130 A24 24 0 0 1 94 130" fill="none" stroke="#E8E4DA" stroke-width="28"/>
+        <rect id="mT" x="80" y="112" width="28" height="19" fill="#E4472F"/>
+      </g></g>
+    </svg>
+    <div id="word"><span class="line" style="padding-bottom:.12em"><span class="w" id="wordIn">Hookline</span></span></div>
+    <div id="tag" class="mono">Professional weather radar</div>
+  </div>
+
+  <div id="phoneWrap" class="abs"><div id="phone"><div id="screen">
+    <canvas id="pc" width="824" height="1744"></canvas>
+    <!-- top chrome -->
+    <div class="chip" style="left:14px;top:52px;width:52px;height:52px;display:flex;align-items:center;justify-content:center">
+      <svg width="22" height="22" viewBox="0 0 22 22"><g stroke="#ECE8DF" stroke-width="2"><line x1="3" y1="6" x2="19" y2="6"/><line x1="3" y1="11" x2="19" y2="11"/><line x1="3" y1="16" x2="19" y2="16"/></g></svg>
+    </div>
+    <div class="chip" style="left:74px;top:52px;height:52px;padding:0 16px;display:flex;flex-direction:column;justify-content:center">
+      <div style="font-weight:600;font-size:20px;line-height:1.1">KTLX</div><div class="cap">Oklahoma City, OK, auto</div>
+    </div>
+    <div style="position:absolute;left:14px;top:114px;display:flex;gap:6px">
+      <div class="chip" style="position:relative;border-radius:14px;padding:5px 11px;display:flex;align-items:center;gap:7px"><span style="width:7px;height:7px;border-radius:4px;background:#ECE8DF"></span><span class="cap">Live</span></div>
+      <div id="warnChip" class="chip" style="position:relative;border-radius:14px;padding:5px 11px;display:flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:5px;background:#E0245E"></span><span class="cap" style="color:#ECE8DF">1 warning</span></div>
+    </div>
+    <!-- tilt ladder -->
+    <div class="chip" style="right:12px;top:282px;padding:5px;display:flex;flex-direction:column;gap:5px" id="tilts">
+      <div class="pill" style="width:58px">0.5°</div><div class="pill" style="width:58px">0.9°</div><div class="pill" style="width:58px">1.3°</div><div class="pill" style="width:58px">1.8°</div><div class="pill" style="width:58px">2.4°</div>
+    </div>
+    <div id="dock">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="cap" id="unit" style="width:38px">dBZ</div>
+        <div id="legend" style="flex:1;height:6px;border-radius:3px"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+        <div style="width:48px;height:48px;border-radius:24px;box-shadow:0 0 0 1px var(--hair) inset;display:flex;align-items:center;justify-content:center">
+          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 2 L14 8 L4 14 Z" fill="#ECE8DF"/></svg></div>
+        <div style="flex:1"><svg id="tape" width="230" height="34"></svg><div class="cap">9:41 PM, latest</div></div>
+        <div style="text-align:right"><div style="font-weight:600;font-size:24px;font-feature-settings:'tnum'">0:42</div><div class="cap">scan age</div></div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:14px" id="prods">
+        <div class="pill" style="flex:1">REF</div><div class="pill" style="flex:1">VEL</div><div class="pill" style="flex:1">SRV</div><div class="pill" style="flex:1">CC</div><div class="pill" style="flex:1">ZDR</div>
+      </div>
+      <div class="cap" style="margin-top:10px;font-size:10.5px;opacity:.8">Radar and warnings: NOAA / NWS. Map © OpenFreeMap © OpenStreetMap contributors</div>
+    </div>
+    <div id="notif">
+      <svg viewBox="0 0 200 200" width="34" height="34" style="flex:none;background:#141B22;border-radius:9px;padding:4px"><g transform="translate(16 0) skewX(-9)"><g transform="translate(4 0)"><rect x="36" y="32" width="28" height="136" fill="#E8E4DA"/><rect x="60" y="84" width="74" height="26" fill="#E8E4DA"/><path d="M142 32 V130 A24 24 0 0 1 94 130" fill="none" stroke="#E8E4DA" stroke-width="28"/><rect x="80" y="112" width="28" height="19" fill="#E4472F"/></g></g></svg>
+      <div><div class="cap">Hookline · now</div><div style="font-weight:600;font-size:16px;margin-top:3px">Tornado Warning for Home until 9:15 PM</div><div class="cap" style="margin-top:3px;color:#ECE8DF;opacity:.85">Take shelter in an interior room now.</div></div>
+    </div>
+    <div id="xsec">
+      <div style="display:flex;justify-content:space-between"><span class="cap" style="color:#ECE8DF">Cross-section A–B</span><span class="cap">REF · 42 km</span></div>
+      <div style="position:relative;margin-top:8px;height:128px">
+        <img src="assets/xsec.png" style="position:absolute;left:34px;right:0;top:0;width:calc(100% - 34px);height:128px;image-rendering:pixelated">
+        <div class="cap" style="position:absolute;left:0;top:-4px;font-size:10.5px">15 km</div><div class="cap" style="position:absolute;left:0;bottom:-4px;font-size:10.5px">0</div>
+      </div>
+    </div>
+  </div></div></div>
+
+  <div id="feat" class="abs">
+    <div class="fi" id="f1"><div class="fk mono">01 / 04</div><div class="fh"><span class="line"><span class="w">Every tilt.</span></span><span class="line"><span class="w">Every product.</span></span></div><div class="fs mono">REF · VEL · SRV · CC · ZDR · raw Level II</div></div>
+    <div class="fi" id="f2"><div class="fk mono">02 / 04</div><div class="fh"><span class="line"><span class="w"><span id="count">291</span> radars.</span></span><span class="line"><span class="w">US and Europe.</span></span></div></div>
+    <div class="fi" id="f3"><div class="fk mono">03 / 04</div><div class="fh"><span class="line"><span class="w">Warnings, the moment</span></span><span class="line"><span class="w">they're issued.</span></span></div><div class="fs mono">NWS · MeteoAlarm · Storm Mode</div></div>
+    <div class="fi" id="f4"><div class="fk mono">04 / 04</div><div class="fh"><span class="line"><span class="w">Storm tracks.</span></span><span class="line"><span class="w">Cross-sections.</span></span><span class="line"><span class="w">Archive.</span></span></div></div>
+  </div>
+  <svg id="sites" class="abs" width="1060" height="400"></svg>
+
+  <div id="s5" class="abs"><span class="line"><span class="w">No subscription.</span></span><span class="line"><span class="w">No ads.</span></span><span class="line"><span class="w">No account.</span></span></div>
+  <div id="endTag">The professional weather radar you buy once.</div>
+  <div id="endFoot" class="mono">Android · US + Europe · One price</div>
+
+  <canvas id="grain" class="abs" width="480" height="270"></canvas>
+  <div id="vig" class="abs"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const P = (t, a, b) => clamp((t - a) / (b - a));
+const eo3 = k => 1 - Math.pow(1 - k, 3);
+const eo5 = k => 1 - Math.pow(1 - k, 5);
+const eoX = k => k >= 1 ? 1 : 1 - Math.pow(2, -10 * k);
+const ei3 = k => k * k * k;
+const eio = k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const eoB = k => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
+
+// in/out envelope: rises over [a, a+ia], holds, falls over [b-ob, b]
+const env = (t, a, b, ia = .3, ob = .25) => Math.min(eo3(P(t, a, a + ia)), 1 - ei3(P(t, b - ob, b)));
+
+const img = {};
+const names = ['stage_ref', 'stage_vel', 'stage_roads', 'phone_ref', 'phone_vel', 'phone_cc', 'phone_roads'];
+let sites = [];
+window.ready = (async () => {
+  await Promise.all(names.map(n => new Promise(r => { const i = new Image(); i.onload = r; i.src = `assets/${n}.png`; img[n] = i; })));
+  await new Promise(r => { const i = new Image(); i.onload = r; i.src = 'assets/xsec.png'; });
+  sites = await (await fetch('assets/sites.json')).json();
+  await document.fonts.load('600 80px IT'); await document.fonts.load('500 20px PM'); await document.fonts.load('500 14px IT');
+  await document.fonts.ready;
+  buildSites(); buildTape(); buildGrain();
+  return true;
+})();
+
+// ---------- words ----------
+function words(el, t, tin, tout, stagger = .06, dur = .55) {
+  const ws = el.querySelectorAll('.w');
+  ws.forEach((w, i) => {
+    const kin = eo5(P(t, tin + i * stagger, tin + i * stagger + dur));
+    const kout = ei3(P(t, tout + i * .03, tout + i * .03 + .28));
+    const y = (1 - kin) * 110 - kout * 110;
+    w.style.transform = `translateY(${y}%)`;
+    w.style.opacity = kin * (1 - kout);
+  });
+  el.style.opacity = (t >= tin - .05 && t <= tout + .6) ? 1 : 0;
+}
+
+// ---------- scene 1/2: radar on the stage ----------
+const ORIGIN = [2484, 3469]; // radar site, stage px (off-screen, bottom right)
+const MESO = [1200, 675];    // mesocyclone, stage px in the 2400x1350 asset
+function drawStage(t) {
+  const c = $('radar'), g = c.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = '#0A0E12'; g.fillRect(0, 0, 1920, 1080);
+  if (t > 6.2) return;
+  // camera: slow push toward the hook, then a punch-in at the cut to the logo
+  const push = lerp(1.0, 1.42, eio(P(t, 0, 5.5))) * lerp(1, 1.9, ei3(P(t, 5.25, 5.95)));
+  const cx = lerp(1250, MESO[0], eio(P(t, 0, 5.5))), cy = lerp(640, MESO[1], eio(P(t, 0, 5.5)));
+  const base = 1920 / 2400 * 1.1;
+  const s = base * push;
+  g.setTransform(s, 0, 0, s, 960 - cx * s, 540 - cy * s);
+  // beam angle: two sweeps (REF paints, then VEL repaints)
+  const a0 = -142, a1 = -93;
+  const k1 = eio(P(t, .1, 1.7)), k2 = eio(P(t, 2.95, 3.6));
+  const ang1 = lerp(a1, a0, k1), ang2 = lerp(a1, a0, k2);
+  const wedge = (ang) => { g.beginPath(); g.moveTo(ORIGIN[0], ORIGIN[1]); g.arc(ORIGIN[0], ORIGIN[1], 6000, ang * Math.PI / 180, a1 * Math.PI / 180 + .3); g.closePath(); };
+  g.globalAlpha = .9; g.drawImage(img.stage_roads, 0, 0); g.globalAlpha = 1;
+  // range rings
+  g.strokeStyle = 'rgba(236,232,223,.07)'; g.lineWidth = 2 / s;
+  for (let r = 1200; r < 6000; r += 600) { g.beginPath(); g.arc(ORIGIN[0], ORIGIN[1], r, -Math.PI, 0); g.stroke(); }
+  g.save(); wedge(ang1); g.clip(); g.drawImage(img.stage_ref, 0, 0); g.restore();
+  if (t >= 2.95) { g.save(); wedge(ang2); g.clip(); g.drawImage(img.stage_vel, 0, 0); g.restore(); }
+  // beam glow
+  const beam = (ang, alpha, col) => {
+    if (alpha <= 0) return;
+    const r = ang * Math.PI / 180;
+    // afterglow: thin fading lines behind the beam, on the side it has just painted
+    for (let k = 1; k <= 14; k++) {
+      const rr = r + k * .0035;
+      g.strokeStyle = `rgba(${col},${alpha * .22 * (1 - k / 15)})`; g.lineWidth = 7 / s;
+      g.beginPath(); g.moveTo(ORIGIN[0], ORIGIN[1]); g.lineTo(ORIGIN[0] + Math.cos(rr) * 6000, ORIGIN[1] + Math.sin(rr) * 6000); g.stroke();
+    }
+    g.strokeStyle = `rgba(${col},${.95 * alpha})`; g.lineWidth = 2.5 / s;
+    g.beginPath(); g.moveTo(ORIGIN[0], ORIGIN[1]); g.lineTo(ORIGIN[0] + Math.cos(r) * 6000, ORIGIN[1] + Math.sin(r) * 6000); g.stroke();
+  };
+  beam(ang1, (1 - P(t, 1.65, 1.9)) * P(t, 0, .12), '236,232,223');
+  beam(ang2, (1 - P(t, 3.55, 3.8)) * P(t, 2.95, 3.02), '228,71,47');
+  // iris: closes from the hook into the logo scene
+  const ir = eo3(P(t, 5.45, 6.0));
+  if (ir > 0) {
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#0A0E12';
+    g.beginPath(); g.arc(960, 540, 1300 * ir, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = `rgba(228,71,47,${1 - ir})`; g.lineWidth = 3;
+    g.beginPath(); g.arc(960, 540, 1300 * ir, 0, Math.PI * 2); g.stroke();
+  }
+  // where the meso sits on screen, for the callouts
+  return [960 + (MESO[0] - cx) * s, 540 + (MESO[1] - cy) * s, s];
+}
+
+function callouts(t, meso) {
+  const ov = $('ov');
+  let html = '';
+  if (meso) {
+    const [mx, my, s] = meso;
+    const draw = (tin, tout, label, sub, dx, dy, col) => {
+      const k = eo3(P(t, tin, tin + .45)) * (1 - ei3(P(t, tout - .25, tout)));
+      if (k <= 0) return;
+      const r = 70 * s / 0.88;
+      const pulse = (t - tin) % 1.2 / 1.2;
+      const lx = mx + dx, ly = my + dy;
+      const L = Math.hypot(dx, dy) - r;
+      const sx = mx + dx / Math.hypot(dx, dy) * r, sy = my + dy / Math.hypot(dx, dy) * r;
+      const ex = lerp(sx, lx, eo3(P(t, tin + .15, tin + .5))), ey = lerp(sy, ly, eo3(P(t, tin + .15, tin + .5)));
+      html += `<circle cx="${mx}" cy="${my}" r="${r}" fill="none" stroke="${col}" stroke-width="2.5" opacity="${k}" stroke-dasharray="${2 * Math.PI * r}" stroke-dashoffset="${2 * Math.PI * r * (1 - eo3(P(t, tin, tin + .45)))}" transform="rotate(-90 ${mx} ${my})"/>`;
+      html += `<circle cx="${mx}" cy="${my}" r="${r * (1 + pulse * .6)}" fill="none" stroke="${col}" stroke-width="1.5" opacity="${k * (1 - pulse) * .6}"/>`;
+      html += `<line x1="${sx}" y1="${sy}" x2="${ex}" y2="${ey}" stroke="${col}" stroke-width="1.5" opacity="${k}"/>`;
+      html += `<circle cx="${ex}" cy="${ey}" r="4" fill="${col}" opacity="${k}"/>`;
+      const tk = eo3(P(t, tin + .4, tin + .7)) * (1 - ei3(P(t, tout - .25, tout)));
+      html += `<text x="${lx + 16}" y="${ly - 4}" font-family="PM" font-size="17" letter-spacing="2.4" fill="#ECE8DF" stroke="#0A0E12" stroke-width="5" paint-order="stroke" font-weight="500" opacity="${tk}">${label}</text>`;
+      html += `<text x="${lx + 16}" y="${ly + 20}" font-family="PM" font-size="14" letter-spacing="2" fill="#ECE8DF" fill-opacity=".8" stroke="#0A0E12" stroke-width="5" paint-order="stroke" opacity="${tk}">${sub}</text>`;
+    };
+    draw(1.25, 2.85, 'HOOK ECHO', 'ROTATING SUPERCELL', 300, 150, '#ECE8DF');
+    draw(4.0, 5.35, 'VELOCITY COUPLET', 'INBOUND  ·  OUTBOUND', 300, 150, '#E4472F');
+  }
+  ov.innerHTML = html;
+}
+
+// ---------- logo ----------
+function logo(t) {
+  const L = $('logo');
+  const vis = t >= 5.6 && t < 22.1;
+  L.style.visibility = vis ? 'visible' : 'hidden';
+  if (!vis) return;
+  const m = $('mark');
+  // build
+  const kL = eo5(P(t, 5.75, 6.15)), kC = eo5(P(t, 5.95, 6.3)), kH = eo3(P(t, 6.05, 6.5)), kT = eoB(P(t, 6.45, 6.75));
+  $('mL').setAttribute('transform', `translate(0 ${168 * (1 - kL)}) scale(1 ${kL || 0.0001})`);
+  $('mL').style.transformOrigin = '0 0';
+  $('mL').setAttribute('y', 32); $('mL').setAttribute('height', 136 * kL); $('mL').setAttribute('transform', `translate(0 ${136 * (1 - kL)})`);
+  $('mC').setAttribute('width', 74 * kC);
+  const len = 98 + Math.PI * 24;
+  $('mH').setAttribute('stroke-dasharray', len); $('mH').setAttribute('stroke-dashoffset', len * (1 - kH));
+  $('mT').setAttribute('transform', `translate(94 ${121.5 - 40 * (1 - kT)}) scale(${clamp(kT, 0, 2)}) translate(-94 -121.5)`);
+  $('mT').setAttribute('opacity', P(t, 6.45, 6.5));
+
+  // layout phases: centre (build) -> left of wordmark -> corner badge (S4/S5) -> centre end card
+  const kSlide = eio(P(t, 6.75, 7.25));              // mark slides left, wordmark reveals
+  const kCorner = eio(P(t, 8.3, 8.95));               // to the corner
+  const kBack = eo5(P(t, 18.68, 19.3));               // back to the end card
+  let size = 300, x = 960 - 150, y = 540 - 170;
+  const xB = 960 - 150 - 330, yB = 540 - 190;          // beside the wordmark
+  x = lerp(x, xB, kSlide); y = lerp(y, yB, kSlide);
+  x = lerp(x, 60, kCorner); y = lerp(y, 50, kCorner); size = lerp(300, 64, kCorner);
+  const xE = 960 - 110, yE = 210;
+  x = lerp(x, xE, kBack); y = lerp(y, yE, kBack); size = lerp(size, 220, kBack);
+  m.style.left = x + 'px'; m.style.top = y + 'px'; m.setAttribute('width', size); m.setAttribute('height', size);
+
+  // wordmark
+  const W = $('word'), wi = $('wordIn');
+  const wordK = eo5(P(t, 6.85, 7.35)) * (1 - ei3(P(t, 8.25, 8.55)));
+  const wordEnd = eo5(P(t, 18.85, 19.35));
+  const kw = Math.max(wordK, wordEnd);
+  W.style.visibility = kw > 0 ? 'visible' : 'hidden';
+  if (wordEnd > 0) {
+    W.style.left = '0px'; W.style.width = '1920px'; W.style.textAlign = 'center'; W.style.top = '470px'; W.style.fontSize = '132px';
+  } else {
+    W.style.left = (960 - 120) + 'px'; W.style.width = 'auto'; W.style.textAlign = 'left'; W.style.top = '420px'; W.style.fontSize = '150px';
+  }
+  wi.style.transform = `translateY(${(1 - kw) * 105}%)`;
+
+  const T = $('tag');
+  const tk = eo3(P(t, 7.2, 7.55)) * (1 - ei3(P(t, 8.2, 8.45)));
+  T.style.left = (960 - 112) + 'px'; T.style.top = '600px';
+  T.style.opacity = tk; T.style.transform = `translateY(${(1 - tk) * 14}px)`;
+  T.style.visibility = tk > 0 ? 'visible' : 'hidden';
+
+  // behind the build: expanding range rings from the centre
+  return eo3(P(t, 5.55, 7.4));
+}
+
+function rings(t) {
+  const k = P(t, 5.55, 8.6);
+  if (k <= 0 || k >= 1) return '';
+  let s = '';
+  for (let i = 0; i < 5; i++) {
+    const r = 120 + i * 140 + eo3(P(t, 5.55 + i * .06, 6.6)) * 60;
+    const a = (1 - P(t, 7.6, 8.5)) * .16 * eo3(P(t, 5.55 + i * .06, 5.9 + i * .06));
+    s += `<circle cx="960" cy="540" r="${r}" fill="none" stroke="#ECE8DF" stroke-width="1.2" opacity="${a}"/>`;
+  }
+  // impact flash ring
+  const f = P(t, 6.45, 7.1);
+  if (f > 0 && f < 1) s += `<circle cx="960" cy="540" r="${180 + 900 * eo3(f)}" fill="none" stroke="#E4472F" stroke-width="${3 * (1 - f)}" opacity="${1 - f}"/>`;
+  return s;
+}
+
+// ---------- phone ----------
+const PROD = {
+  REF: { img: 'phone_ref', unit: 'dBZ', grad: 'linear-gradient(90deg,#04e9e7,#019ff4,#0300f4,#02fd02,#01c501,#008e00,#fdf802,#e5bc00,#fd9500,#fd0000,#d40000,#bc0000,#f800fd,#9854c6)' },
+  VEL: { img: 'phone_vel', unit: 'm/s', grad: 'linear-gradient(90deg,#aadcff,#2878ff,#143c96,#46505f,#5f5046,#a0460a,#ff8c14,#ffe1aa)' },
+  CC: { img: 'phone_cc', unit: 'CC', grad: 'linear-gradient(90deg,#787878,#141ea0,#28a0dc,#46c85a,#f0dc28,#f08c1e,#dc2828,#faaad2)' },
+};
+function buildTape() {
+  let s = '<line x1="0" y1="32" x2="230" y2="32" stroke="#3A4652" stroke-width="1"/>';
+  for (let i = 0; i < 12; i++) {
+    const x = 2 + i * 226 / 11, sel = i === 11;
+    s += `<line x1="${x}" y1="32" x2="${x}" y2="${sel ? 2 : 17}" stroke="${sel ? '#ECE8DF' : '#9AA5AE'}" stroke-width="${sel ? 3 : 2}"/>`;
+  }
+  $('tape').innerHTML = s;
+}
+const CSS2 = 824 / 390;  // canvas px per app dp
+const MESO_P = [196, 404];
+function drawPhone(t, product, fade) {
+  const c = $('pc'), g = c.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = '#141B22'; g.fillRect(0, 0, 824, 1744);
+  // gentle drift so the map feels alive
+  const z = 1.0 + .06 * P(t, 8.5, 16.5);
+  g.setTransform(z * 824 / 780, 0, 0, z * 824 / 780, 412 - 412 * z, 700 - 700 * z);
+  g.globalAlpha = .8; g.drawImage(img.phone_roads, 0, 0); g.globalAlpha = 1;
+  g.globalAlpha = fade.a; g.drawImage(img[PROD[fade.from].img], 0, 0);
+  if (fade.k > 0) { g.globalAlpha = fade.k; g.drawImage(img[PROD[product].img], 0, 0); }
+  g.globalAlpha = 1;
+  const S = 780 / 390; // asset px per dp
+  // tornado warning polygon (F3)
+  const kw = eo3(P(t, 12.75, 13.35)), aw = 1 - P(t, 16.3, 16.6);
+  if (kw > 0) {
+    const pts = [[150, 345], [300, 318], [334, 470], [168, 505]].map(p => [p[0] * S, p[1] * S]);
+    let total = 0; const seg = [];
+    for (let i = 0; i < 4; i++) { const a = pts[i], b = pts[(i + 1) % 4]; const l = Math.hypot(b[0] - a[0], b[1] - a[1]); seg.push(l); total += l; }
+    let left = total * kw;
+    g.fillStyle = `rgba(224,36,94,${.12 * kw * aw})`;
+    if (kw >= 1) { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(...p) : g.moveTo(...p)); g.closePath(); g.fill(); }
+    g.strokeStyle = `rgba(224,36,94,${aw})`; g.lineWidth = 7; g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(...pts[0]);
+    for (let i = 0; i < 4 && left > 0; i++) {
+      const a = pts[i], b = pts[(i + 1) % 4], l = seg[i], f = Math.min(1, left / l);
+      g.lineTo(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f); left -= l;
+    }
+    g.stroke();
+  }
+  // storm track + measure line (F4)
+  const kt = eo3(P(t, 14.75, 15.35)), at = 1 - P(t, 16.3, 16.6);
+  if (kt > 0) {
+    const ang = -32 * Math.PI / 180, step = 46;
+    const ox = MESO_P[0] * S, oy = MESO_P[1] * S;
+    g.strokeStyle = `rgba(236,232,223,${.95 * at})`; g.lineWidth = 5;
+    g.beginPath(); g.moveTo(ox, oy); g.lineTo(ox + Math.cos(ang) * step * 3 * S * kt, oy + Math.sin(ang) * step * 3 * S * kt); g.stroke();
+    for (let i = 1; i <= 3; i++) {
+      if (kt * 3 < i) break;
+      const x = ox + Math.cos(ang) * step * i * S, y = oy + Math.sin(ang) * step * i * S;
+      g.save(); g.translate(x, y); g.rotate(Math.PI / 4); g.fillStyle = `rgba(236,232,223,${at})`; g.fillRect(-9, -9, 18, 18); g.restore();
+      g.font = '500 24px PM'; g.fillStyle = `rgba(236,232,223,${at})`; g.fillText(`${i * 15}′`, x + 18, y + 34);
+    }
+    // cell marker
+    g.strokeStyle = `rgba(236,232,223,${at})`; g.lineWidth = 5;
+    g.beginPath(); g.moveTo(ox, oy - 34); g.lineTo(ox + 30, oy + 18); g.lineTo(ox - 30, oy + 18); g.closePath(); g.stroke();
+    // measure line A-B through the storm
+    const km = eo3(P(t, 15.25, 15.7));
+    if (km > 0) {
+      const A = [110 * S, 470 * S], B = [300 * S, 330 * S];
+      g.setLineDash([16, 12]); g.strokeStyle = `rgba(228,71,47,${at})`; g.lineWidth = 4;
+      g.beginPath(); g.moveTo(...A); g.lineTo(A[0] + (B[0] - A[0]) * km, A[1] + (B[1] - A[1]) * km); g.stroke(); g.setLineDash([]);
+      g.fillStyle = `rgba(228,71,47,${at})`;
+      g.beginPath(); g.arc(...A, 10, 0, 7); g.fill();
+      if (km >= 1) { g.beginPath(); g.arc(...B, 10, 0, 7); g.fill(); }
+      g.font = '600 30px IT'; g.fillStyle = `rgba(236,232,223,${at})`;
+      g.fillText('A', A[0] - 34, A[1] + 10); if (km >= 1) g.fillText('B', B[0] + 18, B[1] - 10);
+    }
+  }
+}
+
+function phone(t) {
+  const W = $('phoneWrap');
+  const kin = eo5(P(t, 8.45, 9.25));
+  const kout = ei3(P(t, 16.25, 16.75));
+  const vis = kin > 0 && kout < 1;
+  W.style.visibility = vis ? 'visible' : 'hidden';
+  if (!vis) return;
+  const ph = $('phone');
+  const idle = Math.sin(t * 1.3) * 1.2;
+  ph.style.transform = `translateY(${(1 - kin) * 900 + kout * 1100}px) rotateX(${(1 - kin) * 28}deg) rotateY(${-10 + 6 * kin + idle}deg) rotateZ(${(1 - kin) * -6 + kout * 8}deg)`;
+
+  // product sequence (F1): REF -> VEL -> CC, then REF from F2 on
+  let prod = 'REF', from = 'REF', k = 0;
+  const seq = [[9.55, 'REF', 'VEL'], [10.15, 'VEL', 'CC'], [10.75, 'CC', 'REF']];
+  for (const [ts, a, b] of seq) { if (t >= ts) { from = a; prod = b; k = eo3(P(t, ts, ts + .22)); } }
+  drawPhone(t, prod, { from, a: 1, k });
+  const shown = k > .5 ? prod : from;
+  [...$('prods').children].forEach(el => el.classList.toggle('sel', el.textContent === shown));
+  $('unit').textContent = PROD[shown].unit; $('legend').style.background = PROD[shown].grad;
+  const tilt = t >= 10.15 && t < 10.75 ? 1 : 0;
+  [...$('tilts').children].forEach((el, i) => el.classList.toggle('sel', i === tilt));
+
+  // warning chip + notification (F3)
+  const wc = eoB(P(t, 12.9, 13.25));
+  $('warnChip').style.opacity = clamp(wc); $('warnChip').style.transform = `scale(${clamp(wc, 0, 1.2)})`;
+  const n = eo5(P(t, 13.1, 13.55)) * (1 - ei3(P(t, 14.45, 14.7)));
+  $('notif').style.transform = `translateY(${(1 - n) * -130}px)`; $('notif').style.opacity = n;
+  // cross-section card (F4)
+  const x = eo5(P(t, 15.7, 16.1));
+  $('xsec').style.transform = `translateY(${(1 - x) * 240}px)`; $('xsec').style.opacity = x;
+}
+
+// ---------- features ----------
+function feats(t) {
+  const F = [['f1', 8.75, 10.5], ['f2', 10.65, 12.55], ['f3', 12.7, 14.55], ['f4', 14.7, 16.35]];
+  for (const [id, a, b] of F) {
+    const el = $(id), vis = t > a - .05 && t < b + .5;
+    el.style.display = vis ? 'block' : 'none';
+    if (!vis) continue;
+    el.querySelector('.fk').style.opacity = env(t, a, b + .2, .25, .25);
+    words(el.querySelector('.fh'), t, a + .05, b, .08, .5);
+    const fs = el.querySelector('.fs');
+    if (fs) { const k = env(t, a + .35, b + .2, .3, .25); fs.style.opacity = k; fs.style.transform = `translateY(${(1 - k) * 10}px)`; }
+  }
+  // count up to the catalogue size
+  const kc = eo3(P(t, 10.7, 11.9));
+  $('count').textContent = Math.round(291 * kc);
+}
+
+// sites: equirectangular, US and Europe, from the app's catalogue
+let siteEls = [];
+function buildSites() {
+  const svg = $('sites');
+  const pj = (lat, lon) => [(lon + 128) * 5.9, (66 - lat) * 8.2];
+  let s = '';
+  const vis = sites.filter(([lat, lon]) => lon > -128 && lat > 23 && lat < 66).sort((a, b) => a[1] - b[1]);
+  vis.forEach(([lat, lon, net], i) => {
+    const [x, y] = pj(lat, lon);
+    s += `<circle class="sd" cx="${x}" cy="${y}" r="4" fill="${net === 'OPERA' ? '#E4472F' : '#ECE8DF'}"/>`;
+  });
+  s += `<text id="lbUS" x="${pj(48, -126)[0]}" y="${pj(51.5, 0)[1]}" font-family="PM" font-size="15" letter-spacing="2.2" fill="#9AA5AE">US · 155 NEXRAD</text>`;
+  s += `<text id="lbEU" x="${pj(0, -8)[0]}" y="${pj(70.5, 0)[1] + 40}" font-family="PM" font-size="15" letter-spacing="2.2" fill="#9AA5AE">EUROPE · 136 OPERA</text>`;
+  svg.innerHTML = s;
+  siteEls = [...svg.querySelectorAll('.sd')];
+}
+function sitesAnim(t) {
+  const on = t > 10.6 && t < 13.2;
+  $('sites').style.visibility = on ? 'visible' : 'hidden';
+  if (!on) return;
+  const out = ei3(P(t, 12.45, 12.8));
+  const n = siteEls.length;
+  siteEls.forEach((el, i) => {
+    const k = eoB(P(t, 10.75 + i / n * .95, 10.95 + i / n * .95));
+    el.setAttribute('r', 4 * clamp(k, 0, 1.6) * (1 - out));
+    el.setAttribute('opacity', clamp(k) * (1 - out));
+  });
+  $('lbUS').setAttribute('opacity', eo3(P(t, 11.2, 11.5)) * (1 - out));
+  $('lbEU').setAttribute('opacity', eo3(P(t, 11.6, 11.9)) * (1 - out));
+}
+
+// ---------- promise + end card ----------
+function promise(t) {
+  const el = $('s5');
+  words(el, t, 16.65, 18.38, .32, .5);
+}
+function endCard(t) {
+  const k = eo3(P(t, 19.3, 19.7));
+  $('endTag').style.top = '640px'; $('endTag').style.opacity = k; $('endTag').style.transform = `translateY(${(1 - k) * 16}px)`;
+  const f = eo3(P(t, 19.65, 20.0));
+  $('endFoot').style.top = '930px'; $('endFoot').style.opacity = f;
+  $('endTag').style.visibility = k > 0 ? 'visible' : 'hidden';
+  $('endFoot').style.visibility = f > 0 ? 'visible' : 'hidden';
+}
+
+// ---------- texture ----------
+const grains = [];
+function buildGrain() {
+  for (let n = 0; n < 6; n++) {
+    const c = document.createElement('canvas'); c.width = 480; c.height = 270;
+    const g = c.getContext('2d'), d = g.createImageData(480, 270);
+    let s = 1234 + n * 999;
+    for (let i = 0; i < d.data.length; i += 4) { s = (s * 16807) % 2147483647; const v = s % 256; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+    g.putImageData(d, 0, 0); grains.push(c);
+  }
+}
+
+window.render = (t) => {
+  const meso = drawStage(t);
+  callouts(t, t < 5.5 ? meso : null);
+  words($('s1t'), t, .45, 2.75, .07);
+  words($('s2t'), t, 3.2, 5.25, .07);
+  $('s1k').style.opacity = env(t, .3, 2.9); $('s2k').style.opacity = env(t, 3.05, 5.35);
+  logo(t);
+  const ov = $('ov');
+  if (t >= 5.5) ov.innerHTML = rings(t);
+  phone(t);
+  feats(t);
+  sitesAnim(t);
+  promise(t);
+  endCard(t);
+  const g = $('grain').getContext('2d');
+  g.drawImage(grains[Math.floor(t * 15) % 6], 0, 0);
+};
+</script>
+</body></html>
