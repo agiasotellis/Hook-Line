@@ -629,8 +629,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                             dwd.latest(site.id, m)?.let { dualPol[m] = it }
                         } catch (e: CancellationException) {
                             throw e
-                        } catch (e: Exception) {
-                            // Dual-pol is extra; keep the last one.
+                        } catch (e: Throwable) {
+                            // Dual-pol is extra; keep the last one (and never let a bad file take the app down).
                         }
                     }
                     first = false

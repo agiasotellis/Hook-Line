@@ -8,6 +8,7 @@ import app.hookline.radar.stormmode.StormModeWorker
 class HooklineApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_WARNINGS, getString(R.string.channel_warnings), NotificationManager.IMPORTANCE_HIGH)

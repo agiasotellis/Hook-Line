@@ -118,10 +118,23 @@ data class EumetsatLayers(val zeroDegree: String?, val indianOcean: String?) {
 
         fun parse(capabilities: String): EumetsatLayers = pick(NAME.findAll(capabilities).map { it.groupValues[1] }.toList())
 
-        suspend fun discover(http: OkHttpClient): EumetsatLayers = withContext(Dispatchers.IO) {
+        /** Streams the capabilities document (it can be very large) and stops after [maxBytes]. */
+        suspend fun discover(http: OkHttpClient, maxBytes: Long = 12L shl 20): EumetsatLayers = withContext(Dispatchers.IO) {
             http.newCall(Request.Builder().url(CAPABILITIES).build()).execute().use { r ->
                 if (!r.isSuccessful) throw IOException("EUMETView HTTP ${r.code}")
-                parse(r.body?.string().orEmpty())
+                val src = r.body?.source() ?: throw IOException("Empty capabilities")
+                val names = LinkedHashSet<String>()
+                var read = 0L
+                while (read < maxBytes) {
+                    val line = src.readUtf8Line() ?: break
+                    read += line.length + 1
+                    if (!line.contains("<Name>")) continue
+                    NAME.findAll(line).forEach { names += it.groupValues[1] }
+                    // Stop once the layers we want have shown up.
+                    val p = pick(names)
+                    if (p.zeroDegree != null && p.indianOcean != null && names.any { it.startsWith("mtg_fd:") }) break
+                }
+                pick(names)
             }
         }
     }

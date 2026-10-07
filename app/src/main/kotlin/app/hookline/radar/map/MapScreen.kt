@@ -78,6 +78,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val radar = remember { RadarGlView(context).also { it.renderer.setClearColor(0xFF141B22.toInt()) } }
     val baseMap = remember { BaseMap(context) }
     var sheet by remember { mutableStateOf<Sheet?>(null) }
+    var crash by remember { mutableStateOf(app.hookline.radar.CrashLog.read(context)) }
 
     // The map owns gestures; the radar follows its camera exactly.
     LaunchedEffect(baseMap) {
@@ -170,6 +171,20 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         }
 
         Column(Modifier.align(Alignment.BottomCenter)) {
+            crash?.let { report ->
+                CrashCard(
+                    onSend = {
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_SUBJECT, "Hookline crash report")
+                            putExtra(android.content.Intent.EXTRA_TEXT, report)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(send, "Send crash report"))
+                        app.hookline.radar.CrashLog.clear(context); crash = null
+                    },
+                    onDismiss = { app.hookline.radar.CrashLog.clear(context); crash = null },
+                )
+            }
             s.inspector?.let { InspectorCard(it, onDismiss = vm::dismissInspector) }
             BottomDock(s, onProduct = vm::selectProduct, onPlay = vm::togglePlay, onScrub = vm::scrubTo)
         }
@@ -204,6 +219,28 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             )
         }
         null -> Unit
+    }
+}
+
+@Composable
+private fun CrashCard(onSend: () -> Unit, onDismiss: () -> Unit) {
+    val c = Hookline.colors
+    Column(
+        Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth()
+            .background(c.raised, RoundedCornerShape(Dimens.PanelRadius))
+            .border(1.dp, c.ink, RoundedCornerShape(Dimens.PanelRadius))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Hookline closed unexpectedly last time", style = Hookline.type.control, color = c.ink)
+        Text(
+            "A technical report was saved on this phone. Sending it shows exactly what went wrong; it contains no location or personal data.",
+            style = Hookline.type.caption, color = c.inkSecondary,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Send report", style = Hookline.type.control, color = c.ink, modifier = Modifier.clickable(onClick = onSend).padding(vertical = 8.dp))
+            Text("Dismiss", style = Hookline.type.control, color = c.inkSecondary, modifier = Modifier.clickable(onClick = onDismiss).padding(vertical = 8.dp))
+        }
     }
 }
 

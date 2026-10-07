@@ -132,7 +132,7 @@ class BaseMap(context: Context) {
     fun setImagery(list: List<Pair<ImagerySource, Float>>) {
         if (list == imagery) return
         imagery = list
-        map?.style?.let { if (it.isFullyLoaded) applyImagery(it) }
+        map?.style?.let { if (it.isFullyLoaded) runCatching { applyImagery(it) } }
     }
 
     private fun applyImagery(style: Style) {
@@ -165,7 +165,7 @@ class BaseMap(context: Context) {
         for (layer in style.layers) restyleLayer(layer)
         applyIntensity(style)
         shownImagery.clear()
-        applyImagery(style)
+        runCatching { applyImagery(style) }
     }
 
     private fun restyleLayer(layer: Layer) {

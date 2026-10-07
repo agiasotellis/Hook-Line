@@ -78,6 +78,7 @@ class RadarRenderer : GLSurfaceView.Renderer {
         composite.valueTex = tex[0]; composite.lutTex = tex[1]; composite.vbo = bufs[0]
         site.valueTex = tex[2]; site.lutTex = tex[3]; site.vbo = bufs[1]
         lineVbo = bufs[2]
+        lineSource = null
         // New context: re-upload whatever was showing.
         for (s in listOf(composite, site)) {
             if (!s.dirty) s.pending = s.current
@@ -140,27 +141,50 @@ class RadarRenderer : GLSurfaceView.Renderer {
         GLES30.glDisableVertexAttribArray(1)
     }
 
+    // Outline triangles are rebuilt only when the list or the zoom changes, not every frame:
+    // European warning regions can add thousands of points.
+    private var lineSource: List<Outline>? = null
+    private var lineMpp = 0.0
+    private var lineGroups: List<Triple<Int, Int, Int>> = emptyList() // argb, first vertex, count
+
     private fun drawLines(vp: Viewport, sx: Float, sy: Float, cx: Float, cy: Float) {
         val list = outlines
         if (list.isEmpty()) return
+        val mpp = vp.metersPerPixel
+        if (list !== lineSource || mpp / lineMpp !in 0.87..1.15) {
+            val byColor = LinkedHashMap<Int, MutableList<FloatArray>>()
+            for (o in list) {
+                val tris = ThickLines.build(o.points, o.closed, (o.widthPx / 2.0 * mpp).toFloat())
+                if (tris.isNotEmpty()) byColor.getOrPut(o.argb) { mutableListOf() } += tris
+            }
+            val total = byColor.values.sumOf { l -> l.sumOf { it.size } }
+            val all = FloatArray(total)
+            var at = 0
+            val groups = mutableListOf<Triple<Int, Int, Int>>()
+            for ((argb, parts) in byColor) {
+                val first = at / 2
+                for (t in parts) { System.arraycopy(t, 0, all, at, t.size); at += t.size }
+                groups += Triple(argb, first, at / 2 - first)
+            }
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, lineVbo)
+            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, all.size * 4, GlUtil.floats(all), GLES30.GL_STATIC_DRAW)
+            lineGroups = groups
+            lineSource = list
+            lineMpp = mpp
+        }
         GLES30.glUseProgram(lineProgram)
         GLES30.glUniform2f(GLES30.glGetUniformLocation(lineProgram, "u_center"), cx, cy)
         GLES30.glUniform2f(GLES30.glGetUniformLocation(lineProgram, "u_scale"), sx, sy)
         val colorLoc = GLES30.glGetUniformLocation(lineProgram, "u_color")
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, lineVbo)
-        val mpp = vp.metersPerPixel.toFloat()
-        for (o in list) {
-            val tris = ThickLines.build(o.points, o.closed, o.widthPx / 2f * mpp)
-            if (tris.isEmpty()) continue
-            val argb = o.argb
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 8, 0)
+        for ((argb, first, count) in lineGroups) {
             GLES30.glUniform4f(
                 colorLoc,
                 ((argb shr 16) and 0xFF) / 255f, ((argb shr 8) and 0xFF) / 255f, (argb and 0xFF) / 255f, ((argb ushr 24) and 0xFF) / 255f,
             )
-            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, tris.size * 4, GlUtil.floats(tris), GLES30.GL_STREAM_DRAW)
-            GLES30.glEnableVertexAttribArray(0)
-            GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 8, 0)
-            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, tris.size / 2)
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, first, count)
         }
     }
 
