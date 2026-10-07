@@ -78,6 +78,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val radar = remember { RadarGlView(context).also { it.renderer.setClearColor(0xFF141B22.toInt()) } }
     val baseMap = remember { BaseMap(context) }
     var sheet by remember { mutableStateOf<Sheet?>(null) }
+    // Loading screen: until the map style and the first radar picture are in (or 10 s at most).
+    var mapReady by remember { mutableStateOf(false) }
+    var loadingDone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(10_000); loadingDone = true }
+    val dataReady = s.siteLayer != null || s.compositeLayer != null || s.mode == Mode.MOSAIC ||
+        s.status is FeedStatus.Stale || (s.mode == Mode.NONE && s.status is FeedStatus.NoCoverage)
+    LaunchedEffect(mapReady, dataReady) { if (mapReady && dataReady) loadingDone = true }
     var crash by remember { mutableStateOf(app.hookline.radar.CrashLog.read(context)) }
 
     // The map owns gestures; the radar follows its camera exactly.
@@ -87,6 +94,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         }
         baseMap.onCameraIdle = vm::onCameraIdle
         baseMap.onLongPress = vm::inspect
+        baseMap.onStyleLoaded = { mapReady = true }
     }
     LaunchedEffect(s.camera?.seq) { s.camera?.let { baseMap.moveTo(it.lat, it.lon, it.zoom) } }
     LaunchedEffect(s.intensity) { baseMap.setIntensity(s.intensity) }
@@ -191,6 +199,15 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     }
 
     val close = { sheet = null }
+    LoadingScreen(
+        visible = !loadingDone,
+        status = when {
+            !mapReady -> "Loading map"
+            s.mode == Mode.COMPOSITE -> "Loading European radar"
+            s.mode == Mode.SITE && s.site != null -> "Connecting to ${s.site!!.label}"
+            else -> "Finding radar near you"
+        },
+    )
     when (sheet) {
         Sheet.MENU -> MenuSheet(s, onPick = { sheet = it }, onDismiss = close)
         Sheet.RADARS -> RadarsSheet(

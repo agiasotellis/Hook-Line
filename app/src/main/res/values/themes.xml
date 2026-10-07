@@ -5,5 +5,11 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+    <!-- Launch screen: the mark on the map background, handed over to the in-app loading screen. -->
+    <style name="Theme.Hookline.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/map_void</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Hookline</item>
+    </style>
     <color name="map_void">#FF141B22</color>
 </resources>

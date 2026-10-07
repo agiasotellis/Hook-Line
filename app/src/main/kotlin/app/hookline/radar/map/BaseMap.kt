@@ -46,6 +46,11 @@ class BaseMap(context: Context) {
     /** Fires when the camera settles: centre, zoom and visible bounds. */
     var onCameraIdle: ((LatLng, Double, LatLngBounds?) -> Unit)? = null
     var onLongPress: ((LatLng) -> Unit)? = null
+    /** Fires once the map style has loaded (or immediately if it already has). */
+    var onStyleLoaded: (() -> Unit)? = null
+        set(v) { field = v; if (styleLoaded) v?.invoke() }
+    var styleLoaded = false
+        private set
 
     private val roadLayers = mutableListOf<String>()
     private val labelLayers = mutableListOf<String>()
@@ -71,7 +76,11 @@ class BaseMap(context: Context) {
         mapView.onCreate(null)
         mapView.getMapAsync { m ->
             map = m
-            m.setStyle(Style.Builder().fromUri(STYLE_URL)) { style -> restyle(style) }
+            m.setStyle(Style.Builder().fromUri(STYLE_URL)) { style ->
+                restyle(style)
+                styleLoaded = true
+                onStyleLoaded?.invoke()
+            }
             m.addOnCameraMoveListener { onCameraMove?.invoke() }
             m.addOnCameraIdleListener {
                 onCameraIdle?.invoke(m.cameraPosition.target ?: LatLng(0.0, 0.0), m.cameraPosition.zoom, visibleBounds())

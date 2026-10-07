@@ -22,6 +22,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:theme="@style/Theme.Hookline.Starting"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
