@@ -44,7 +44,7 @@ jobs:
           HOOKLINE_KEY_PASSWORD: ${{ secrets.HOOKLINE_KEY_PASSWORD }}
         run: |
           set -o pipefail
-          ./gradlew :core:radar:test :core:data:test :app:assembleDebug :app:bundleRelease --stacktrace 2>&1 | tee build.log
+          { ./gradlew :core:radar:test :core:data:test :app:assembleDebug --stacktrace && ./gradlew :app:bundleRelease --stacktrace; } 2>&1 | tee build.log
 
       - name: Report failure on the commit
         if: failure()

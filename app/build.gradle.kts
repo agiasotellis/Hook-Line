@@ -52,7 +52,8 @@ android {
     // Play Store releases use an App Bundle, which splits automatically.
     splits {
         abi {
-            isEnable = true
+            // App bundles split by CPU on Google Play's side; per-ABI APK splits clash with bundle resource shrinking.
+            isEnable = gradle.startParameter.taskNames.none { it.contains("bundle", ignoreCase = true) }
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64")
             isUniversalApk = false
