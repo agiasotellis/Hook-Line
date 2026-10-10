@@ -18,7 +18,7 @@ These are code or repo changes; none were made by this paperwork pass.
 - [ ] Optional: ask for the notification permission once after onboarding (otherwise Android 13+ users who never open the Storm Mode sheet get no warnings).
 - [x] Privacy: coordinates sent to `api.weather.gov/alerts/active?point=` are rounded to 2 decimals (about 1 km) since 1.0.0. (Filtering on the device instead would remove the location declaration entirely; see `data-safety.md`, judgement call A.)
 - [ ] About sheet affiliation sentence: make it explicit "does not represent any government" (see `declarations.md` → Government apps).
-- [ ] **NWS User-Agent** (`app/build.gradle.kts`): `HooklineRadar/0.1 (support@hookline.app)`. Make sure you own and read that address (or change it to `[YOUR CONTACT EMAIL]`), and bump the version string. NWS uses it to contact you if the app misbehaves.
+- [ ] **NWS User-Agent** (`app/build.gradle.kts`): `HooklineRadar/1.0 (agiasotellis@gmail.com)`. Done: your address. Make sure you read that address (or change it to `[YOUR CONTACT EMAIL]`), and bump the version string. NWS uses it to contact you if the app misbehaves.
 - [ ] Greek and German in-app translations actually ship in 1.0.0 (the listings say so).
 - [ ] README: "Requirements: … Android SDK 35" → 36; "thirty years of archive" → archive since 2008 (store text already uses 2008).
 - [ ] Release build (not debug) tested on a real device: `BuildConfig.DEBUG` unlocks everything, so the trial and paywall only behave correctly in release builds.

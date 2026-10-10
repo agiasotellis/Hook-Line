@@ -15,7 +15,7 @@ android {
         versionCode = 16
         versionName = "1.0.5"
         // NWS asks every client to identify itself with contact info.
-        buildConfigField("String", "NWS_USER_AGENT", "\"HooklineRadar/0.1 (support@hookline.app)\"")
+        buildConfigField("String", "NWS_USER_AGENT", "\"HooklineRadar/1.0 (agiasotellis@gmail.com)\"")
     }
 
     // Release signing: the upload key comes from CI secrets (see docs/PLAY-RELEASE.md).

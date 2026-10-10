@@ -8,7 +8,7 @@ The questionnaire is run by IARC inside Play Console. Ratings are issued immedia
 
 | Field | Answer |
 |---|---|
-| Email address | [YOUR CONTACT EMAIL] (IARC sends the rating certificate here; it is not published) |
+| Email address | agiasotellis@gmail.com (IARC sends the rating certificate here; it is not published) |
 | Category | **All Other App Types** (wording on some forms: "Utility, Productivity, Communication, or Other") |
 
 ### Why this category and not "Reference, News, or Educational"

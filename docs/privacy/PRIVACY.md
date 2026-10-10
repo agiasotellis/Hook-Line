@@ -1,6 +1,6 @@
 # Hookline Radar – Privacy Policy
 
-**Effective date:** [EFFECTIVE DATE, e.g. 7 October 2026]
+**Effective date:** 11 October 2026
 
 This privacy policy explains how the Android app **Hookline Radar** (package name `app.hookline.radar`, shown on Google Play as "Hookline Radar" and on your phone as "Hookline") handles information. Hookline is a weather radar app that shows public radar, satellite, lightning and warning data.
 
@@ -12,7 +12,7 @@ Hookline is developed and published by an individual developer:
 
 - **Name:** [YOUR FULL LEGAL NAME]
 - **Address:** [YOUR POSTAL ADDRESS, or city and country]
-- **Email for privacy questions:** [YOUR CONTACT EMAIL]
+- **Email for privacy questions:** agiasotellis@gmail.com
 
 In this policy "we" and "the developer" mean this person. For the purposes of the EU and UK General Data Protection Regulation (GDPR), the developer is the controller of the small amount of personal data described in section 5 (messages you choose to send us).
 
@@ -23,7 +23,7 @@ In this policy "we" and "the developer" mean this person. For the purposes of th
 The developer only receives information if **you** choose to send it, for example:
 
 - **Crash reports.** If Hookline closes unexpectedly, a technical report is saved on your phone. The next time you open the app it offers to send it. Nothing is sent unless you tap **Send report**. That opens Android's share sheet, and you choose how to send it (for example your email app) and can read or edit it first. The report contains the app version, the Android version, the phone manufacturer and model, the time of the crash and a technical stack trace. It does not contain your location, your saved places or any account information. If you send it by email, we also receive your email address and anything else you write.
-- **Support emails** you send to [YOUR CONTACT EMAIL].
+- **Support emails** you send to agiasotellis@gmail.com.
 
 ## 3. Information stored only on your phone
 
@@ -87,13 +87,13 @@ The developer does not share any personal data with anyone, except where require
 ## 8. Retention and deletion
 
 - On your phone: remove saved places in the app, delete offline maps in the app, or delete everything at once with **Android Settings → Apps → Hookline → Storage → Clear storage**, or by uninstalling the app.
-- Crash reports and emails you send us: kept only as long as needed to resolve the issue, and at most [24 months], unless the law requires longer. Email [YOUR CONTACT EMAIL] to have them deleted sooner.
+- Crash reports and emails you send us: kept only as long as needed to resolve the issue, and at most 24 months, unless the law requires longer. Email agiasotellis@gmail.com to have them deleted sooner.
 - Purchase records: kept by Google Play; the developer keeps sales records as long as tax law requires.
 - Requests already sent to the data services in section 4 are held by those services under their own policies.
 
 ## 9. Your rights
 
-Depending on where you live (for example under the GDPR in the EU/UK or the CCPA/CPRA in California), you may have the right to access, correct, delete or restrict the use of personal data we hold, to object, and to data portability. Because the developer holds no data about you unless you emailed us, most requests can be answered quickly: write to [YOUR CONTACT EMAIL]. We will reply within one month. Where the GDPR applies, our legal basis for handling messages you send us is our legitimate interest in answering you and fixing the app (Article 6(1)(f)). You may also complain to your data protection authority [e.g. in Greece: Hellenic Data Protection Authority, www.dpa.gr].
+Depending on where you live (for example under the GDPR in the EU/UK or the CCPA/CPRA in California), you may have the right to access, correct, delete or restrict the use of personal data we hold, to object, and to data portability. Because the developer holds no data about you unless you emailed us, most requests can be answered quickly: write to agiasotellis@gmail.com. We will reply within one month. Where the GDPR applies, our legal basis for handling messages you send us is our legitimate interest in answering you and fixing the app (Article 6(1)(f)). You may also complain to your data protection authority (in Greece: the Hellenic Data Protection Authority, www.dpa.gr).
 
 We do not sell or "share" personal information as those terms are defined in California law.
 
@@ -115,5 +115,5 @@ If this policy changes, we will publish the new version at this address with a n
 
 ## 14. Contact
 
-Questions or requests about privacy: **[YOUR CONTACT EMAIL]**
+Questions or requests about privacy: **agiasotellis@gmail.com**
 [YOUR FULL LEGAL NAME], [YOUR POSTAL ADDRESS, or city and country]
