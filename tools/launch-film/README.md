@@ -8,3 +8,5 @@ Sources for the 22-second Hookline launch video (1920×1080, 30 fps).
 - Encode: `ffmpeg -framerate 30 -i frames/f%04d.jpg -i score.wav -c:v libx264 -crf 17 -pix_fmt yuv420p -c:a aac -shortest brag.mp4`
 
 Fonts (Inter Tight, IBM Plex Mono) come from the @fontsource npm packages. Rendered output is not committed.
+
+Vertical (9:16) cut for TikTok, Reels and Shorts: `film-vertical.html`, captured by `frames-v.js` into `frames-v/`, encoded the same way to `hookline-vertical-9x16.mp4`.
