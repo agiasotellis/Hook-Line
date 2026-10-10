@@ -44,6 +44,30 @@
                 android:resource="@xml/widget_radar_info" />
         </receiver>
 
+        <receiver
+            android:name=".stormmode.WarningsWidget"
+            android:exported="true"
+            android:label="@string/widget_warnings_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_warnings_info" />
+        </receiver>
+
+        <receiver
+            android:name=".stormmode.RainBarWidget"
+            android:exported="true"
+            android:label="@string/widget_rain_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_rain_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

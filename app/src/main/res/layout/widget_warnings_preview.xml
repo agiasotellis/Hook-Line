@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_background" android:padding="14dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:letterSpacing="0.08" android:textAllCaps="true" android:textColor="#FF9AA5AE" android:textSize="11sp" android:textStyle="bold" android:text="@string/widget_preview_warnings" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:maxLines="1" android:textColor="#FF9AA5AE" android:textSize="11sp" android:text="21:40" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+            <ImageView android:layout_width="4dp" android:layout_height="32dp"
+                android:contentDescription="@null" android:scaleType="fitXY" android:src="@drawable/widget_stripe" android:tint="#FFE0245E" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:layout_marginStart="10dp" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:ellipsize="end" android:maxLines="1" android:textColor="#FFE8E4DA" android:textSize="14sp" android:textStyle="bold" android:text="@string/widget_preview_event1" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:ellipsize="end" android:maxLines="1" android:textColor="#FF9AA5AE" android:textSize="12sp" android:text="@string/widget_preview_detail1" />
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+            <ImageView android:layout_width="4dp" android:layout_height="32dp"
+                android:contentDescription="@null" android:scaleType="fitXY" android:src="@drawable/widget_stripe" android:tint="#FFF5A623" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:layout_marginStart="10dp" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:ellipsize="end" android:maxLines="1" android:textColor="#FFE8E4DA" android:textSize="14sp" android:textStyle="bold" android:text="@string/widget_preview_event2" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:ellipsize="end" android:maxLines="1" android:textColor="#FF9AA5AE" android:textSize="12sp" android:text="@string/widget_preview_detail2" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

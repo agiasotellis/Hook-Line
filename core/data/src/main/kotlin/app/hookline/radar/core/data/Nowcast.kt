@@ -137,6 +137,24 @@ object Nowcast {
         return NowcastResult(false, null, false, motion)
     }
 
+    /**
+     * Rain expected at the grid centre every 5 minutes from now to +60 min
+     * (13 values, in the grid's units). Without a motion estimate only "now"
+     * is known; the later steps are NaN.
+     */
+    fun series(cur: LocalGrid, motion: GridMotion?): FloatArray {
+        val c = cur.half.toDouble(); val r = cur.half.toDouble()
+        return FloatArray(13) { i ->
+            val t = i * 5
+            val v = when {
+                t == 0 -> neighbourhoodMax(cur, c, r)
+                motion == null -> Float.NaN
+                else -> neighbourhoodMax(cur, c - motion.eastKmPerMin * t / cur.cellKm, r + motion.northKmPerMin * t / cur.cellKm)
+            }
+            if (v == Float.NEGATIVE_INFINITY) Float.NaN else v
+        }
+    }
+
     /** Max over a 3×3 neighbourhood: allows for small errors in the motion. */
     private fun neighbourhoodMax(g: LocalGrid, col: Double, row: Double): Float {
         val c0 = col.roundToInt(); val r0 = row.roundToInt()

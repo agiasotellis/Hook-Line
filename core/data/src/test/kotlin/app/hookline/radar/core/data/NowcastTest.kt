@@ -46,6 +46,18 @@ class NowcastTest {
         assertNull(f.startsInMin)
     }
 
+    @Test fun seriesFollowsTheBand() {
+        val prev = band(2, 0)
+        val cur = band(6, 600_000)
+        val s = Nowcast.series(cur, Nowcast.motion(prev, cur, 0.2f))
+        assertEquals(13, s.size)
+        assertEquals(0f, s[0], 0f)           // dry now
+        assertEquals(5f, s[8], 0f)           // band overhead at +40 min
+        assertTrue(s.indexOfFirst { it >= 0.2f } * 5 in 30..40)
+        val still = Nowcast.series(cur, null)
+        assertTrue(still.drop(1).all { it.isNaN() })
+    }
+
     @Test fun roundTrip() {
         val g = band(6, 123)
         val back = LocalGrid.decode(g.encode())!!

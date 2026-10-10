@@ -6,4 +6,18 @@
     <string name="disclaimer">Follow official NWS and local guidance. Hookline shows NWS data and isn\'t a warning service.</string>
     <string name="widget_description">Radar around your place, rain in the next hour and warnings</string>
     <string name="widget_name">Hookline radar</string>
+    <string name="widget_warnings_name">Hookline warnings</string>
+    <string name="widget_warnings_description">Official warnings for your places, most severe first</string>
+    <string name="widget_rain_name">Hookline rain bar</string>
+    <string name="widget_rain_description">The next hour of rain at your place, no map</string>
+    <string name="widget_preview_warnings">Warnings</string>
+    <string name="widget_preview_event1">Tornado Warning</string>
+    <string name="widget_preview_detail1">Home · until 21:15</string>
+    <string name="widget_preview_event2">Severe Thunderstorm Warning</string>
+    <string name="widget_preview_detail2">Work · until 22:00</string>
+    <string name="widget_preview_rain">Rain in about 20 min</string>
+    <string name="widget_preview_rain_place">Home · radar 21:40</string>
+    <string name="widget_now">Now</string>
+    <string name="widget_30">30 min</string>
+    <string name="widget_60">60 min</string>
 </resources>

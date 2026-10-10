@@ -5,4 +5,18 @@
     <string name="disclaimer">Ακολουθείτε τις οδηγίες της NWS και των τοπικών αρχών. Το Hookline δείχνει δεδομένα της NWS και δεν είναι υπηρεσία προειδοποιήσεων.</string>
     <string name="widget_description">Ραντάρ γύρω από το μέρος σας, βροχή την επόμενη ώρα και προειδοποιήσεις</string>
     <string name="widget_name">Ραντάρ Hookline</string>
+    <string name="widget_warnings_name">Προειδοποιήσεις Hookline</string>
+    <string name="widget_warnings_description">Επίσημες προειδοποιήσεις για τα μέρη σας, οι σοβαρότερες πρώτα</string>
+    <string name="widget_rain_name">Μπάρα βροχής Hookline</string>
+    <string name="widget_rain_description">Η βροχή της επόμενης ώρας στο μέρος σας, χωρίς χάρτη</string>
+    <string name="widget_preview_warnings">Προειδοποιήσεις</string>
+    <string name="widget_preview_event1">Κόκκινη προειδοποίηση καταιγίδων</string>
+    <string name="widget_preview_detail1">Σπίτι · έως 21:15</string>
+    <string name="widget_preview_event2">Πορτοκαλί προειδοποίηση ανέμων</string>
+    <string name="widget_preview_detail2">Δουλειά · έως 22:00</string>
+    <string name="widget_preview_rain">Βροχή σε περίπου 20 λεπτά</string>
+    <string name="widget_preview_rain_place">Σπίτι · ραντάρ 21:40</string>
+    <string name="widget_now">Τώρα</string>
+    <string name="widget_30">30 λεπτά</string>
+    <string name="widget_60">60 λεπτά</string>
 </resources>

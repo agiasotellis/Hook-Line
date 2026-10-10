@@ -24,6 +24,7 @@ import app.hookline.radar.core.data.RainSource
 import app.hookline.radar.core.data.WarningItem
 import app.hookline.radar.core.data.WarningLevel
 import app.hookline.radar.core.data.WarningRegions
+import app.hookline.radar.core.data.toWarningItem
 import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttpClient
 import java.io.File
@@ -52,7 +53,11 @@ class AlertChecker(private val context: Context) {
     /** Storm Mode on/off (on by default). */
     var enabled: Boolean
         get() = prefs.getBoolean("enabled", true)
-        set(v) = prefs.edit().putBoolean("enabled", v).apply()
+        set(v) {
+            prefs.edit().putBoolean("enabled", v).apply()
+            // The widgets say when Storm Mode is off, since they stop updating.
+            WarningsWidget.refresh(context); RainBarWidget.refresh(context)
+        }
 
     /** Lowest European warning level that notifies. */
     var euMinLevel: WarningLevel
@@ -97,6 +102,8 @@ class AlertChecker(private val context: Context) {
         val found = mutableListOf<Alert>()
         val euFeeds = HashMap<String, List<WarningItem>>()
         var widgetWarning: String? = null
+        val widgetEntries = mutableListOf<WarningsWidget.Entry>()
+        val failed = mutableSetOf<Long>()
         for (place in places) {
             if (!place.warnings) continue
             val point = LatLon(place.lat, place.lon)
@@ -108,12 +115,14 @@ class AlertChecker(private val context: Context) {
                     val now = Instant.now()
                     val active = items.filter { region in it.codes && it.isActive(now) }
                     if (place.id == widgetPlaceId(places)) widgetWarning = active.maxByOrNull { it.level.ordinal }?.event
+                    active.filter { it.level >= WarningLevel.YELLOW }.forEach { widgetEntries += WarningsWidget.Entry.of(place.id, place.name, it) }
                     active.filter { it.level.ordinal >= euMinLevel.ordinal }
                         .filter { markSeen("${it.id}:${it.level}:${place.id}") }
                         .forEach { notify(place.name, it) }
                 } else if (Coverage.inUs(point)) {
                     val alerts = nws.activeAt(point).filter { it.hazard != Hazard.OTHER }
                     if (place.id == widgetPlaceId(places)) widgetWarning = alerts.firstOrNull()?.event
+                    alerts.forEach { widgetEntries += WarningsWidget.Entry.of(place.id, place.name, it.toWarningItem()) }
                     alerts.filter { markSeen("${it.id}:${place.id}") }.forEach { notify(place.name, it) }
                     found += alerts
                 }
@@ -121,8 +130,10 @@ class AlertChecker(private val context: Context) {
                 throw e
             } catch (e: Exception) {
                 // One place failing shouldn't stop the others.
+                failed += place.id
             }
         }
+        runCatching { WarningsWidget.publish(context, widgetEntries, failed) }
         if (includeRain && rainDue()) checkRain(places, widgetWarning)
         return found
     }
@@ -144,8 +155,9 @@ class AlertChecker(private val context: Context) {
 
     private suspend fun checkRain(places: List<Place>, widgetWarning: String?) {
         prefs.edit().putLong("rain_last", System.currentTimeMillis()).apply()
-        val wanted = places.filter { it.rain }
         val widgetId = widgetPlaceId(places)
+        // The widgets' place gets an outlook even when its rain alerts are off.
+        val wanted = places.filter { it.rain || it.id == widgetId }
         val byKind = wanted.groupBy { rainSource.kindFor(LatLon(it.lat, it.lon)) }
         for ((kind, group) in byKind) {
             if (kind == null) {
@@ -171,10 +183,12 @@ class AlertChecker(private val context: Context) {
                         prev = older.grid(center, CELL_KM, GRID)
                     }
                     if (loadGrid(place.id)?.timeMillis != newestTime) saveGrid(place.id, grid)
-                    val result = Nowcast.forecast(grid, prev?.let { Nowcast.motion(it, grid, thr) }, thr, heavy)
+                    val motion = prev?.let { Nowcast.motion(it, grid, thr) }
+                    val result = Nowcast.forecast(grid, motion, thr, heavy)
                     saveOutlook(place, nowcastSummary(result))
-                    maybeNotifyRain(place, result)
+                    if (place.rain) maybeNotifyRain(place, result)
                     if (place.id == widgetId) {
+                        runCatching { RainBarWidget.publish(context, place, kind, newestTime, Nowcast.series(grid, motion), result) }
                         runCatching { RadarWidget.publish(context, place, grid, kind, result, widgetWarning) }
                     }
                 }
@@ -266,6 +280,10 @@ class AlertChecker(private val context: Context) {
     }
 
     companion object {
+        /** Storm Mode switch, readable without building a checker (widgets). */
+        fun isEnabled(context: Context): Boolean =
+            context.getSharedPreferences("storm_mode", Context.MODE_PRIVATE).getBoolean("enabled", true)
+
         /** Rain grid: 121 × 2 km = ±120 km around each place. */
         const val CELL_KM = 2.0
         const val GRID = 121

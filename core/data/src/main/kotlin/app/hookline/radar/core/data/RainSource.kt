@@ -35,10 +35,7 @@ class RainSource(
     enum class Kind { OPERA_RATE, MRMS_DBZ }
 
     /** Rain and heavy-rain thresholds in the source's unit. */
-    fun thresholds(kind: Kind): Pair<Float, Float> = when (kind) {
-        Kind.OPERA_RATE -> 0.2f to 7.5f // mm/h
-        Kind.MRMS_DBZ -> 18f to 40f // dBZ
-    }
+    fun thresholds(kind: Kind): Pair<Float, Float> = thresholdsFor(kind)
 
     fun kindFor(p: LatLon): Kind? = when {
         Imagery.inMrms(p) && p.lat in 20.0..55.0 && p.lon in -130.0..-60.0 -> Kind.MRMS_DBZ
@@ -151,6 +148,12 @@ class RainSource(
     }
 
     companion object {
+        /** Rain and heavy-rain thresholds in the source's unit. */
+        fun thresholdsFor(kind: Kind): Pair<Float, Float> = when (kind) {
+            Kind.OPERA_RATE -> 0.2f to 7.5f // mm/h
+            Kind.MRMS_DBZ -> 18f to 40f // dBZ
+        }
+
         const val MRMS_PRODUCT = "ReflectivityAtLowestAltitude_00.50"
         private val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
         private val STAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
