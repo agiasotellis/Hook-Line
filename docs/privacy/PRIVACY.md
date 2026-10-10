@@ -8,10 +8,10 @@ The short version: **Hookline has no account, no ads, no analytics and no server
 
 ## 1. Who we are
 
-Hookline is developed and published by an individual developer:
+Hookline is developed and published by DesignDesk:
 
-- **Name:** [YOUR FULL LEGAL NAME]
-- **Address:** [YOUR POSTAL ADDRESS, or city and country]
+- **Name:** DesignDesk
+- **Address:** Mytilini (Lesvos), Greece
 - **Email for privacy questions:** agiasotellis@gmail.com
 
 In this policy "we" and "the developer" mean this person. For the purposes of the EU and UK General Data Protection Regulation (GDPR), the developer is the controller of the small amount of personal data described in section 5 (messages you choose to send us).
@@ -116,4 +116,4 @@ If this policy changes, we will publish the new version at this address with a n
 ## 14. Contact
 
 Questions or requests about privacy: **agiasotellis@gmail.com**
-[YOUR FULL LEGAL NAME], [YOUR POSTAL ADDRESS, or city and country]
+DesignDesk, Mytilini (Lesvos), Greece

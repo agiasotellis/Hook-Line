@@ -233,8 +233,8 @@ Erste Version von Hookline Radar.
 | Category | **Weather** |
 | Tags (up to 5, chosen from Play's list in *Store settings → Tags*) | Pick the closest available to: Weather radar, Weather, Weather alerts, Storm tracker, Maps. Only Play's own tag list can be used. |
 | Email address (required, public) | agiasotellis@gmail.com |
-| Phone number (optional; public) | [YOUR PHONE, optional unless trader rules require it] |
-| Website (optional) | [YOUR WEBSITE, e.g. the GitHub Pages URL] |
+| Phone number (optional; public) | Leave blank unless the trader declaration asks for it |
+| Website (optional) | Leave blank |
 | Privacy policy | [PRIVACY POLICY URL] (set under App content, see declarations.md) |
 | External marketing | Leave on (lets Google advertise the listing outside Play) |
 
