@@ -12,3 +12,4 @@ captures/
 keystore.properties
 out/
 brag-output/
+__pycache__/

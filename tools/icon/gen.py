@@ -1,45 +1,83 @@
-"""Logo I (oblique Hook H) as Android vector path data, skew baked into the coordinates."""
-import math, sys
-T = math.tan(math.radians(-9))
+"""Hookline mark: the velocity couplet inside a bearing scale.
 
-def xf(x, y):  # inner translate(4) -> skewX(-9) -> translate(16)
-    x = x + 4
-    return x + T * y + 16, y
+A disc split in two with the halves displaced (inbound / outbound winds, the
+radar signature of a rotating storm), surrounded by a 10-degree bearing scale.
+Geometry is in a 100-unit design box centred on (50, 50):
 
-def arc(cx, cy, r, a0, a1, n=24):  # degrees, y down; a=0 -> +x, 90 -> +y (down)
-    return [(cx + r * math.cos(math.radians(a0 + (a1 - a0) * i / n)), cy + r * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
+  couplet   one circle r = 22, halves offset +/-4 vertically, gap 2 x 1.2
+  scale     36 ticks every 10 deg, majors (0/90/180/270) r 34 -> 40 @ 1.8,
+            minors r 37 -> 40 @ 1.2 at 30 % ink
 
-shapes_bone = [
-    [(36, 32), (64, 32), (64, 168), (36, 168)],          # left stem
-    [(60, 84), (134, 84), (134, 110), (60, 110)],        # crossbar
-    [(128, 32), (156, 32)] + arc(118, 130, 38, 0, 180) + arc(118, 130, 10, 180, 0) + [(128, 32)],  # stem + hook
-]
-shape_red = [(80, 112), (108, 112), (108, 131), (80, 131)]
+Writes the Android vector drawables and docs/brand/hookline-mark.svg.
+Usage: python3 tools/icon/gen.py app/src/main/res
+"""
+import math, os, sys
 
-pts = [xf(*p) for s in shapes_bone + [shape_red] for p in s]
-minx, maxx = min(p[0] for p in pts), max(p[0] for p in pts)
-miny, maxy = min(p[1] for p in pts), max(p[1] for p in pts)
+INK, RED = 'E8E4DA', 'E4472F'
+R, D, G = 22, 4, 1.2
 
-def path(poly, scale, ox, oy):
-    q = [xf(*p) for p in poly]
-    return 'M' + ' L'.join(f'{(x - minx) * scale + ox:.2f},{(y - miny) * scale + oy:.2f}' for x, y in q) + ' Z'
 
-def paths(box, size):  # fit art into a box of `box` units, centred in `size`
-    s = box / max(maxx - minx, maxy - miny)
-    ox = (size - (maxx - minx) * s) / 2; oy = (size - (maxy - miny) * s) / 2
-    return [path(p, s, ox, oy) for p in shapes_bone], path(shape_red, s, ox, oy)
+def ticks():
+    out = []
+    for a in range(0, 360, 10):
+        major = a % 90 == 0
+        r0 = 34 if major else 37
+        c, s = math.cos(math.radians(a)), math.sin(math.radians(a))
+        out.append((50 + r0 * c, 50 + r0 * s, 50 + 40 * c, 50 + 40 * s, 1.8 if major else 1.2, major))
+    return out
 
-def vector(size, box, bone, red, dp):
-    b, r = paths(box, size)
-    out = [f'<vector xmlns:android="http://schemas.android.com/apk/res/android"\n    android:width="{dp}dp" android:height="{dp}dp"\n    android:viewportWidth="{size}" android:viewportHeight="{size}">']
-    for d in b: out.append(f'    <path android:fillColor="{bone}" android:pathData="{d}" />')
-    out.append(f'    <path android:fillColor="{red}" android:pathData="{r}" />')
+
+def halves(k=1.0, cx=50.0, cy=50.0, scale=1.0):
+    """Left and right half-disc paths in SVG/Android path syntax."""
+    r, d, g = R * scale, D * scale * k, G * scale
+    left = f'M{cx - g:.3f},{cy - r - d:.3f} A{r:.3f},{r:.3f} 0 0 0 {cx - g:.3f},{cy + r - d:.3f} Z'
+    right = f'M{cx + g:.3f},{cy - r + d:.3f} A{r:.3f},{r:.3f} 0 0 1 {cx + g:.3f},{cy + r + d:.3f} Z'
+    return left, right
+
+
+def tf(v, scale, off):
+    return v * scale + off
+
+
+def vector(size, scale, dp, ink, red, minor_alpha, with_ticks=True):
+    """Mark scaled by `scale` (design units -> viewport units), centred in a `size` viewport."""
+    off = size / 2 - 50 * scale
+    out = [f'<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
+           f'    android:width="{dp}dp" android:height="{dp}dp"\n'
+           f'    android:viewportWidth="{size}" android:viewportHeight="{size}">']
+    if with_ticks:
+        for x0, y0, x1, y1, w, major in ticks():
+            colour = f'#FF{ink}' if major else f'#{minor_alpha}{ink}'
+            out.append(f'    <path android:strokeColor="{colour}" android:strokeWidth="{w * scale:.3f}" '
+                       f'android:pathData="M{tf(x0, scale, off):.3f},{tf(y0, scale, off):.3f} L{tf(x1, scale, off):.3f},{tf(y1, scale, off):.3f}" />')
+    left, right = halves(cx=size / 2, cy=size / 2, scale=scale)
+    out.append(f'    <path android:fillColor="#FF{ink}" android:pathData="{left}" />')
+    out.append(f'    <path android:fillColor="#FF{red}" android:pathData="{right}" />')
     out.append('</vector>\n')
     return '\n'.join(out)
 
-res = sys.argv[1]
-head = '<?xml version="1.0" encoding="utf-8"?>\n<!-- Hookline mark (oblique Hook H). Generated from tools/icon/gen.py; edit there. -->\n'
-open(f'{res}/drawable/ic_launcher_foreground.xml', 'w').write(head + vector(108, 48, '#FFE8E4DA', '#FFE4472F', 108))
-open(f'{res}/drawable/ic_launcher_monochrome.xml', 'w').write(head + vector(108, 48, '#FFFFFFFF', '#FFFFFFFF', 108))
-open(f'{res}/drawable/ic_hookline_mark.xml', 'w').write(head + vector(100, 100, '#FFE8E4DA', '#FFE4472F', 48))
-print('bbox', round(maxx - minx, 1), round(maxy - miny, 1))
+
+def svg(ink='#ECE8DF', red='#E4472F', minor='rgba(236,232,223,.30)', bg=None):
+    s = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    if bg: s += f'<rect width="100" height="100" rx="23" fill="{bg}"/>'
+    for x0, y0, x1, y1, w, major in ticks():
+        s += f'<line x1="{x0:.2f}" y1="{y0:.2f}" x2="{x1:.2f}" y2="{y1:.2f}" stroke="{ink if major else minor}" stroke-width="{w}"/>'
+    left, right = halves()
+    return s + f'<path d="{left}" fill="{ink}"/><path d="{right}" fill="{red}"/></svg>'
+
+
+if __name__ == '__main__':
+    res = sys.argv[1]
+    head = '<?xml version="1.0" encoding="utf-8"?>\n<!-- Hookline mark (couplet + bearing scale). Generated by tools/icon/gen.py; edit there. -->\n'
+    # Adaptive icon: 108 viewport, visible ~72, safe circle 66. Mark diameter 80 units -> 58.
+    w = lambda name, txt: open(os.path.join(res, 'drawable', name), 'w').write(head + txt)
+    w('ic_launcher_foreground.xml', vector(108, 0.725, 108, INK, RED, '4D'))
+    w('ic_launcher_monochrome.xml', vector(108, 0.725, 108, 'FFFFFF', 'FFFFFF', '59'))
+    w('ic_hookline_mark.xml', vector(100, 1.18, 48, INK, RED, '4D'))
+    # Status-bar icon: the couplet alone (ticks vanish at 24 dp), white on transparent.
+    w('ic_stat_hookline.xml', vector(24, 0.38, 24, 'FFFFFF', 'FFFFFF', 'FF', with_ticks=False))
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    os.makedirs(os.path.join(root, 'docs', 'brand'), exist_ok=True)
+    open(os.path.join(root, 'docs', 'brand', 'hookline-mark.svg'), 'w').write(svg())
+    open(os.path.join(root, 'docs', 'brand', 'hookline-icon.svg'), 'w').write(svg(bg='#0E141A'))
+    print('ok')
