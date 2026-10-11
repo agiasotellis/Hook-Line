@@ -10,6 +10,10 @@ html,body{margin:0;background:#0A0E12}
 .ph{position:absolute;left:50%;top:640px;width:900px;transform:translateX(-50%);filter:drop-shadow(0 40px 80px rgba(0,0,0,.6))}
 .mark{position:absolute;left:90px;top:84px}
 .fg{position:relative;width:1024px;height:500px;overflow:hidden;background:#0A0E12;font-family:IT;color:#ECE8DF}
+.rc{position:absolute;left:149px;top:958px;width:784px;min-height:118px;box-sizing:border-box;padding:18px 26px;display:flex;align-items:center;gap:22px;background:rgba(28,37,46,.94);border:2px solid rgba(236,232,223,.5);border-radius:26px;box-shadow:0 18px 40px rgba(0,0,0,.45)}
+.rc .t{font-weight:600;font-size:32px;letter-spacing:-.015em;line-height:1.15;white-space:nowrap}
+.rc .s{font-family:IT,ITG;font-weight:600;font-size:22px;color:#9AA5AE;margin-top:6px}
+.rc .r{display:flex;flex-direction:column;align-items:flex-end;gap:12px;margin-left:auto}
 .icon{width:512px;height:512px;background:#141B22;display:flex;align-items:center;justify-content:center}
 </style></head><body><div id="root"></div>
 <script>
@@ -20,26 +24,47 @@ const T = {
         cc: ['Debris and hail<br>stand out.', 'Dual-pol CC · US and German radars'],
         warn: ['Warnings the moment<br>they\'re issued.', 'NWS · MeteoAlarm · Storm Mode'],
         track: ['Storm tracks and<br>cross-sections.', 'Arrival times · hail risk · vertical slices'],
-        fg: ['Professional weather radar.', 'Buy once. US and Europe.'] },
+        fg: ['Professional weather radar.', 'Buy once. US and Europe.'],
+        rain: ['Will it rain here?<br>Know when.', 'Next-hour rain forecast, with confidence'], card: ['Rain likely in 15–25 min', 'Your location · Medium confidence'] },
   el: { ref: ['Κάθε γωνία.<br>Κάθε προϊόν.', 'REF · VEL · SRV · CC · ZDR · Level II'],
         vel: ['Δείτε την<br>περιστροφή.', 'Ταχύτητα και ταχύτητα ως προς την καταιγίδα'],
         cc: ['Συντρίμμια και χαλάζι<br>ξεχωρίζουν.', 'Διπλή πόλωση CC · ραντάρ ΗΠΑ και Γερμανίας'],
         warn: ['Προειδοποιήσεις<br>τη στιγμή που εκδίδονται.', 'NWS · MeteoAlarm · Λειτουργία καταιγίδας'],
         track: ['Πορείες καταιγίδων<br>και κατακόρυφες τομές.', 'Ώρα άφιξης · κίνδυνος χαλαζιού · τομές'],
-        fg: ['Επαγγελματικό ραντάρ καιρού.', 'Μία αγορά. ΗΠΑ και Ευρώπη.'] },
+        fg: ['Επαγγελματικό ραντάρ καιρού.', 'Μία αγορά. ΗΠΑ και Ευρώπη.'],
+        rain: ['Θα βρέξει εδώ;<br>Μάθετε πότε.', 'Βροχή της επόμενης ώρας, με βεβαιότητα'], card: ['Πιθανή βροχή σε 15–25 λεπτά', 'Η τοποθεσία σας · Μέτρια βεβαιότητα'] },
   de: { ref: ['Jede Elevation.<br>Jedes Produkt.', 'REF · VEL · SRV · CC · ZDR · Level II'],
         vel: ['Rotation<br>sichtbar machen.', 'Radialgeschwindigkeit, auch sturmrelativ'],
         cc: ['Trümmer und Hagel<br>stechen hervor.', 'Dual-Pol CC · Radare in USA und Deutschland'],
         warn: ['Warnungen, sobald<br>sie ausgegeben werden.', 'NWS · MeteoAlarm · Sturmmodus'],
         track: ['Zugbahnen und<br>Querschnitte.', 'Ankunftszeit · Hagelrisiko · Vertikalschnitte'],
-        fg: ['Profi-Wetterradar.', 'Einmal kaufen. USA und Europa.'] },
+        fg: ['Profi-Wetterradar.', 'Einmal kaufen. USA und Europa.'],
+        rain: ['Regnet es hier?<br>Wissen, wann.', 'Regenvorhersage für die nächste Stunde'], card: ['Regen wahrscheinlich in 15–25 min', 'Dein Standort · Mittlere Sicherheit'] },
 };
 window.show = (mode, lang, key) => {
   const r = document.getElementById('root');
   if (mode === 'shot') {
     const [cap, sub] = T[lang][key];
+    // The headline feature: the rain card the app shows over the map.
+    let card = '';
+    if (key === 'rain') {
+      const [t, st] = T[lang].card;
+      // Next hour, 5-min steps: dry, then light -> heavy -> easing (same colours as the app).
+      const lv = [-1,-1,-1,-1,.12,.3,.5,.72,.9,.62,.4,.2,-1];
+      const bw = 12, gap = 2.6, H = 52;
+      const mix = k => { const a=[0x6F,0xB6,0xF0], b=[0x2A,0x63,0xD6]; return 'rgb(' + a.map((x,i)=>Math.round(x+(b[i]-x)*k)).join(',') + ')'; };
+      let bars = '';
+      lv.forEach((k, i) => {
+        const x = i * (bw + gap);
+        if (k < 0) bars += `<circle cx="${x + bw/2}" cy="${H-4}" r="2.6" fill="#3A4652"/>`;
+        else { const h = H * (0.18 + 0.82 * k); bars += `<rect x="${x}" y="${H-2-h}" width="${bw}" height="${h}" rx="3" fill="${k > .8 ? '#E4472F' : mix(k)}"/>`; }
+      });
+      const meter = [1,1,0].map(f => `<div style="width:26px;height:7px;border-radius:4px;background:${f ? '#ECE8DF' : '#3A4652'}"></div>`).join('');
+      card = `<div class="rc"><div><div class="t">${t}</div><div class="s">${st}</div></div>
+        <div class="r"><svg width="178" height="${H}">${bars}</svg><div style="display:flex;gap:6px">${meter}</div></div></div>`;
+    }
     r.innerHTML = `<div class="shot" lang="${lang}"><svg class="mark" viewBox="0 0 200 200" width="92" height="92" style="margin:-30px 0 0 -14px">${MARK()}</svg>
-      <div class="cap">${cap}</div><div class="sub">${sub}</div><img class="ph" src="storeraw/${key}.png"></div>`;
+      <div class="cap">${cap}</div><div class="sub">${sub}</div><img class="ph" src="storeraw/${key === 'rain' ? 'ref' : key}.png">${card}</div>`;
   } else if (mode === 'fg') {
     const [a, b] = T[lang].fg;
     r.innerHTML = `<div class="fg" lang="${lang}"><img src="assets/stage_ref.png" style="position:absolute;left:300px;top:-200px;width:1250px;opacity:.95">

@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
   await p.evaluate(async () => { await document.fonts.load('600 40px IT', 'Αβγ'); await document.fonts.load('500 20px ITG', 'Αβγ'); await document.fonts.load('500 20px PM'); });
   const out = '../store';
   for (const lang of ['en', 'el', 'de']) {
-    const keys = ['ref', 'vel', 'warn', 'track', 'cc'];
+    const keys = ['rain', 'ref', 'vel', 'warn', 'track', 'cc'];
     for (const [i, k] of keys.entries()) {
       await p.evaluate(([l, k]) => window.show('shot', l, k), [lang, k]);
       await (await p.$('.shot')).screenshot({ path: `${out}/${lang}/screenshot-${i + 1}-${k}.png` });
