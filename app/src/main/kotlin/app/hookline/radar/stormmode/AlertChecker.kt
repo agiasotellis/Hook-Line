@@ -121,18 +121,19 @@ class AlertChecker(private val context: Context) {
                     val active = items.filter { region in it.codes && it.isActive(now) }
                     if (place.id == widgetPlaceId(places)) widgetWarning = active.maxByOrNull { it.level.ordinal }?.event
                     active.filter { it.level >= WarningLevel.YELLOW }.forEach { widgetEntries += WarningsWidget.Entry.of(place.id, place.name, it) }
-                    active.filter { it.level.ordinal >= euMinLevel.ordinal }
-                        .filter { mayNotifyWarning(it.level == WarningLevel.RED) }
+                    // Nothing is recorded as delivered unless it can actually be shown.
+                    if (canNotify()) active.filter { it.level.ordinal >= euMinLevel.ordinal }
+                        .filter { mayNotifyWarning(severe(it)) }
                         .filter { markSeen("${it.id}:${it.level}:${place.id}") }
-                        .filter { isNew(place.id, it.event, it.level.ordinal) }
+                        .filter { isNew(place.id, it, severe(it)) }
                         .forEach { notify(place.name, it) }
                 } else if (Coverage.inUs(point)) {
                     val alerts = nws.activeAt(point).filter { it.hazard != Hazard.OTHER }
                     if (place.id == widgetPlaceId(places)) widgetWarning = alerts.firstOrNull()?.event
                     alerts.forEach { widgetEntries += WarningsWidget.Entry.of(place.id, place.name, it.toWarningItem()) }
-                    alerts.filter { mayNotifyWarning(it.toWarningItem().level == WarningLevel.RED) }
+                    if (canNotify()) alerts.filter { mayNotifyWarning(severe(it)) }
                         .filter { markSeen("${it.id}:${place.id}") }
-                        .filter { isNew(place.id, it.event, it.toWarningItem().level.ordinal) }
+                        .filter { isNew(place.id, it.toWarningItem(), severe(it)) }
                         .forEach { notify(place.name, it) }
                     found += alerts
                 }
@@ -228,8 +229,11 @@ class AlertChecker(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun maybeNotifyRain(place: Place, f: RainForecast) {
         if (f.result.rainingNow) return
-        f.arrivalWindow ?: return
+        val window = f.arrivalWindow ?: return
         if (f.confidence == Confidence.LOW || f.confidence == Confidence.NONE) return
+        if (app.hookline.radar.core.data.ForecastIssue.OLD_DATA in f.issues) return
+        // The predicted arrival is already behind us (old picture): nothing useful to announce.
+        if (f.minutesFromNow(window.last, System.currentTimeMillis()) <= 0) return
         if (f.peak < alertPrefs.rainMin) return
         val now = System.currentTimeMillis()
         if (alertPrefs.inQuietHours(now)) return
@@ -247,24 +251,38 @@ class AlertChecker(private val context: Context) {
         context.getSystemService(NotificationManager::class.java).notify(("rain" + place.id).hashCode(), n)
     }
 
-    /** Quiet hours hold back warnings, except red / tornado ones if the user allows them. */
+    /** Quiet hours hold back warnings, except severe ones if the user allows them. */
     private fun mayNotifyWarning(severe: Boolean): Boolean =
         !alertPrefs.inQuietHours() || (severe && alertPrefs.quietLetSevere)
 
+    /** Red MeteoAlarm warnings; NWS tornado and flash flood warnings, and anything tagged as an emergency or destructive. */
+    private fun severe(w: WarningItem): Boolean = w.level == WarningLevel.RED
+
+    private fun severe(a: Alert): Boolean {
+        val text = (a.description.orEmpty() + " " + a.headline.orEmpty()).uppercase()
+        return a.hazard == Hazard.TORNADO_WARNING || a.hazard == Hazard.TORNADO_EMERGENCY ||
+            a.hazard == Hazard.FLASH_FLOOD_WARNING || "EMERGENCY" in text || "DESTRUCTIVE" in text
+    }
+
     /**
-     * Duplicate suppression: warning services re-issue the same warning with a
-     * new id when they extend or update it. Notify again only if it's a new
-     * event for this place, or the level went up, or the last one was over 6 h ago.
+     * Duplicate suppression for re-issued warnings. Services publish an
+     * updated or extended warning under a new id; that shouldn't buzz the
+     * phone again. A warning counts as a repeat only if it's the same event
+     * for the same place, its time span overlaps the previous one, it isn't
+     * more severe, and it isn't severe at all (those always notify).
      */
-    private fun isNew(placeId: Long, event: String, level: Int): Boolean {
-        val k = "recent_${placeId}_${event.lowercase().hashCode()}"
-        val prev = prefs.getString(k, null)?.split('|')
+    private fun isNew(placeId: Long, w: WarningItem, severe: Boolean): Boolean {
+        val k = "recent_${placeId}_${w.event.lowercase().hashCode()}"
         val now = System.currentTimeMillis()
-        val prevLevel = prev?.getOrNull(0)?.toIntOrNull()
-        val prevTime = prev?.getOrNull(1)?.toLongOrNull() ?: 0L
-        val fresh = prevLevel == null || level > prevLevel || now - prevTime > 6 * 3_600_000L
-        if (fresh) prefs.edit().putString(k, "$level|$now").apply()
-        return fresh
+        val onset = w.onset?.toEpochMilli() ?: now
+        val expires = w.expires?.toEpochMilli() ?: (now + 3 * 3_600_000L)
+        val prev = prefs.getString(k, null)?.split('|')?.mapNotNull { it.toLongOrNull() }?.takeIf { it.size == 3 }
+        val overlaps = prev != null && onset <= prev[2] && expires >= prev[1]
+        val repeat = overlaps && !severe && w.level.ordinal <= prev!![0]
+        // Remember the latest level seen and the combined span of the overlapping warnings.
+        val record = if (overlaps) "${w.level.ordinal}|${minOf(onset, prev!![1])}|${maxOf(expires, prev[2])}" else "${w.level.ordinal}|$onset|$expires"
+        prefs.edit().putString(k, record).apply()
+        return !repeat
     }
 
     // ---- warnings ---------------------------------------------------------------------------

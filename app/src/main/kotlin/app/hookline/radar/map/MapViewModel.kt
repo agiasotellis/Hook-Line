@@ -423,8 +423,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                // Network or memory trouble: keep the last forecast if there is one, marked by its age.
-                _state.value.rain.takeIf { it.forecast != null && it.place == label } ?: RainCard(RainCardStatus.ERROR, label)
+                // Network or memory trouble: re-judge the last forecast at the current time (its
+                // confidence falls as it ages, to none after 45 min), else say it's unavailable.
+                val last = _state.value.rain.takeIf { it.forecast != null && it.place == label }
+                val again = last?.let { runCatching { rainOutlook.reanalyse() }.getOrNull() }
+                if (last != null && again != null) last.copy(forecast = again) else RainCard(RainCardStatus.ERROR, label)
             }
             _state.update { it.copy(rain = card) }
         }

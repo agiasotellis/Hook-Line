@@ -105,7 +105,7 @@ class RainBarWidget : AppWidgetProvider() {
                     else -> {
                         val k = level(kind, v)
                         r.top = base - (18f + k * (base - 18f))
-                        p.color = if (v >= heavy) HEAVY else mix(LIGHT, STRONG, k)
+                        p.color = if (app.hookline.radar.core.data.RainIntensity.of(kind, v) >= app.hookline.radar.core.data.RainIntensity.HEAVY) HEAVY else mix(LIGHT, STRONG, k)
                         c.drawRoundRect(r, 5f, 5f, p)
                     }
                 }

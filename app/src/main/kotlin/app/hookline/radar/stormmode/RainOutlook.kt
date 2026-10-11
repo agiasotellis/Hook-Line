@@ -24,6 +24,7 @@ class RainOutlook(private val context: Context, private val source: RainSource) 
         data object NoCoverage : Result
     }
 
+    private var lastKind: RainSource.Kind? = null
     private var lastKey: String? = null
     private var lastPoint: LatLon? = null
     private var lastCur: LocalGrid? = null
@@ -32,24 +33,38 @@ class RainOutlook(private val context: Context, private val source: RainSource) 
     suspend fun forecast(point: LatLon, now: Long = System.currentTimeMillis()): Result {
         val kind = source.kindFor(point) ?: return Result.NoCoverage
         val keys = source.latestKeys(kind)
-        val (key, time) = keys.firstOrNull() ?: return Result.NoCoverage
+        // Covered, but no recent picture: the feed is behind. That's an error, not "no radar here".
+        val (key, time) = keys.firstOrNull() ?: throw IllegalStateException("No recent radar picture")
         val near = lastPoint?.let { abs(it.lat - point.lat) < 0.02 && abs(it.lon - point.lon) < 0.02 } == true
         if (key == lastKey && near && lastCur != null) {
-            return Result.Ready(RainForecaster.analyse(kind, lastCur!!, lastPrev, now))
+            return Result.Ready(analyse(kind, lastCur!!, lastPrev, now))
         }
-        val cur = source.load(kind, key, time).grid(point, AlertChecker.CELL_KM, AlertChecker.GRID)
+        val frame = source.load(kind, key, time)
+        val cur = withContext(Dispatchers.Default) { frame.grid(point, AlertChecker.CELL_KM, AlertChecker.GRID) }
         // Previous picture: the grid saved last time if it's 5–25 minutes older and for the same spot.
         var prev = load()?.takeIf { g ->
             time - g.timeMillis in 300_000L..1_500_000L && g.size == cur.size &&
                 abs(g.centerLat - cur.centerLat) < 1e-4 && abs(g.centerLon - cur.centerLon) < 1e-4
         }
         if (prev == null && keys.size > 1) {
-            prev = source.load(kind, keys[1].first, keys[1].second).grid(point, AlertChecker.CELL_KM, AlertChecker.GRID)
+            val older = source.load(kind, keys[1].first, keys[1].second)
+            prev = withContext(Dispatchers.Default) { older.grid(point, AlertChecker.CELL_KM, AlertChecker.GRID) }
         }
         withContext(Dispatchers.IO) { runCatching { file().writeBytes(cur.encode()) } }
-        lastKey = key; lastPoint = point; lastCur = cur; lastPrev = prev
-        return Result.Ready(RainForecaster.analyse(kind, cur, prev, now))
+        lastKind = kind; lastKey = key; lastPoint = point; lastCur = cur; lastPrev = prev
+        return Result.Ready(analyse(kind, cur, prev, now))
     }
+
+    /** The last forecast re-judged at [now] (offline): its confidence drops as the picture ages. */
+    suspend fun reanalyse(now: Long = System.currentTimeMillis()): RainForecast? {
+        val kind = lastKind ?: return null
+        val cur = lastCur ?: return null
+        return analyse(kind, cur, lastPrev, now)
+    }
+
+    /** The motion search is ~16M comparisons: keep it off the main thread. */
+    private suspend fun analyse(kind: RainSource.Kind, cur: LocalGrid, prev: LocalGrid?, now: Long) =
+        withContext(Dispatchers.Default) { RainForecaster.analyse(kind, cur, prev, now) }
 
     private fun file() = File(File(context.filesDir, "nowcast").apply { mkdirs() }, "here.bin")
     private suspend fun load(): LocalGrid? = withContext(Dispatchers.IO) {

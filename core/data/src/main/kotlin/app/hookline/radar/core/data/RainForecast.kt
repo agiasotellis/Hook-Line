@@ -22,6 +22,8 @@ enum class ForecastIssue {
     FAR_AHEAD,
     /** Part of the area around the place has no radar data. */
     EDGE_OF_COVERAGE,
+    /** No radar data at the place itself or for most of the area: no forecast. */
+    NO_DATA,
 }
 
 /** Rain intensity in words, the same scale for dBZ and mm/h sources. */
@@ -36,7 +38,7 @@ enum class RainIntensity { NONE, LIGHT, MODERATE, HEAVY, VERY_HEAVY;
                 // Reflectivity: 18–30 light, 30–40 moderate, 40–50 heavy, 50+ very heavy (hail possible from ~55).
                 RainSource.Kind.MRMS_DBZ -> when { v < 30f -> LIGHT; v < 40f -> MODERATE; v < 50f -> HEAVY; else -> VERY_HEAVY }
                 // Rain rate (mm/h), WMO-style classes.
-                RainSource.Kind.OPERA_RATE -> when { v < 2.5f -> LIGHT; v < 7.6f -> MODERATE; v < 50f -> HEAVY; else -> VERY_HEAVY }
+                RainSource.Kind.OPERA_RATE -> when { v < 2.5f -> LIGHT; v < 7.5f -> MODERATE; v < 50f -> HEAVY; else -> VERY_HEAVY }
             }
         }
 
@@ -124,8 +126,11 @@ object RainForecaster {
             (1 until series.size).firstOrNull { !series[it].isNaN() && series[it] < thr }?.let { it * 5 }
         } else null
 
+        // Nothing measured at the place itself, or most of the area missing (an outage): don't guess.
+        if (series[0].isNaN() || missing > cur.values.size * 6 / 10) issues += ForecastIssue.NO_DATA
+
         val confidence = when {
-            ageMin > UNUSABLE_DATA_MIN -> Confidence.NONE
+            ageMin > UNUSABLE_DATA_MIN || ForecastIssue.NO_DATA in issues -> Confidence.NONE
             else -> {
                 var score = 3
                 for (i in issues) score -= when (i) {

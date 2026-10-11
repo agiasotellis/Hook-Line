@@ -91,7 +91,7 @@ fun RainCardView(card: RainCard, now: Long, onClick: () -> Unit, onAllowLocation
 @Composable
 fun RainBars(f: RainForecast, modifier: Modifier = Modifier) {
     val c = Hookline.colors
-    val (thr, heavy) = remember(f.kind) { RainSource.thresholdsFor(f.kind) }
+    val thr = remember(f.kind) { RainSource.thresholdsFor(f.kind).first }
     Canvas(modifier) {
         val n = f.series.size
         val gap = size.width * 0.012f + 1f
@@ -106,7 +106,8 @@ fun RainBars(f: RainForecast, modifier: Modifier = Modifier) {
                 else -> {
                     val k = RainIntensity.level(f.kind, v)
                     val h = size.height * (0.18f + 0.82f * k)
-                    drawRoundRect(if (v >= heavy) RainHeavy else lerp(RainLight, RainStrong, k), Offset(x, base - h), Size(bw, h), CornerRadius(bw * 0.25f))
+                    val heavyRain = RainIntensity.of(f.kind, v) >= RainIntensity.HEAVY
+                    drawRoundRect(if (heavyRain) RainHeavy else lerp(RainLight, RainStrong, k), Offset(x, base - h), Size(bw, h), CornerRadius(bw * 0.25f))
                 }
             }
         }
@@ -203,7 +204,7 @@ fun RainSheet(card: RainCard, now: Long, onAlerts: () -> Unit, onDismiss: () -> 
 private fun IntensityKey() {
     val c = Hookline.colors
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        listOf(RainLight to tr("Light"), lerp(RainLight, RainStrong, 0.6f) to tr("Moderate"), RainStrong to tr("Strong"), RainHeavy to tr("Heavy")).forEach { (col, label) ->
+        listOf(RainLight to tr("Light"), lerp(RainLight, RainStrong, 0.5f) to tr("Moderate"), RainHeavy to tr("Heavy")).forEach { (col, label) ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Box(Modifier.size(9.dp).background(col, RoundedCornerShape(2.dp)))
                 Text(label, style = Hookline.type.caption, color = c.inkSecondary)

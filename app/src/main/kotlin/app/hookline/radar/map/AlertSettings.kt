@@ -83,7 +83,7 @@ fun AlertSettingsSection() {
         HourStepper(tr("Until"), to) { to = it; prefs.quietTo = it }
         ToggleRow(
             tr("Let severe warnings through"),
-            tr("Red warnings and tornado warnings still notify"),
+            tr("Red warnings, tornado and flash flood warnings, and emergencies still notify"),
             severe,
         ) { severe = it; prefs.quietLetSevere = it }
         Text(

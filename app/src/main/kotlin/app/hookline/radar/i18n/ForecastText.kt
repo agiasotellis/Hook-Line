@@ -18,11 +18,14 @@ object ForecastText {
         val r = f.result
         val heavy = f.peak >= RainIntensity.HEAVY
         val w = f.arrivalWindow
+        // Minutes of the hour that are still ahead: an old picture covers less of the future.
+        val left = (60 - f.ageMinutes(now)).coerceAtLeast(0)
         return when {
             r.rainingNow -> if (r.heavy) tr("Heavy rain now") else tr("Raining now")
+            w != null && f.minutesFromNow(w.last, now) <= 0 -> tr("Rain may be starting now")
             w != null -> {
                 val lo = f.minutesFromNow(w.first, now)
-                val hi = f.minutesFromNow(w.last, now).coerceAtLeast(lo + 5)
+                val hi = f.minutesFromNow(w.last, now)
                 val likely = f.confidence != Confidence.LOW
                 when {
                     lo <= 0 && likely -> if (heavy) tr("Heavy rain likely within %s min", hi) else tr("Rain likely within %s min", hi)
@@ -31,13 +34,18 @@ object ForecastText {
                     else -> if (heavy) tr("Heavy rain possible in %s–%s min", lo, hi) else tr("Rain possible in %s–%s min", lo, hi)
                 }
             }
-            else -> tr("Dry for the next hour")
+            ForecastIssue.NO_MOTION in f.issues -> tr("Rain nearby, track not known yet")
+            left >= 55 -> tr("Dry for the next hour")
+            else -> tr("Dry for the next %s min", (left / 5 * 5).coerceAtLeast(5))
         }
     }
 
     /** Second line: what else to know, in a few words. */
     fun detail(f: RainForecast, now: Long): String {
-        if (f.confidence == Confidence.NONE) return tr("The latest radar picture is too old to forecast from")
+        if (f.confidence == Confidence.NONE) {
+            return if (ForecastIssue.NO_DATA in f.issues) tr("Radar data is missing around this place")
+            else tr("The latest radar picture is too old to forecast from")
+        }
         val r = f.result
         val ends = f.endsInMin
         return when {
@@ -45,6 +53,7 @@ object ForecastText {
             r.rainingNow && ForecastIssue.NO_MOTION in f.issues -> tr("Not enough radar history yet to tell when it stops")
             r.rainingNow -> tr("Likely to continue for the next hour")
             f.arrivalWindow != null -> intensity(f.peak)
+            ForecastIssue.NO_MOTION in f.issues -> tr("Needs another radar picture to tell if it's coming your way")
             !f.rainNearby -> tr("No rain on radar within about 120 km")
             ForecastIssue.SHOWERY in f.issues -> tr("Showers nearby could still form overhead")
             else -> tr("Rain nearby isn't heading your way")
@@ -68,13 +77,14 @@ object ForecastText {
 
     /** Why the forecast is less certain, one sentence per reason. */
     fun issue(i: ForecastIssue, f: RainForecast, now: Long): String = when (i) {
-        ForecastIssue.NO_MOTION -> tr("Only one recent radar picture, so the rain's movement isn't known yet.")
+        ForecastIssue.NO_MOTION -> tr("The rain's movement can't be measured yet: there's only one recent radar picture, or too little rain to track.")
         ForecastIssue.OLD_DATA -> tr("The latest radar picture is %s min old.", f.ageMinutes(now))
         ForecastIssue.CHANGING_FAST -> tr("The rain is growing or fading quickly, which a forecast from movement can't capture.")
         ForecastIssue.SHOWERY -> tr("Showers and storms: new cells can form within minutes, with no warning on radar.")
         ForecastIssue.POOR_MATCH -> tr("The rain isn't moving as one area, so its track is uncertain.")
         ForecastIssue.FAR_AHEAD -> tr("It's more than half an hour away; timing gets less certain with distance.")
         ForecastIssue.EDGE_OF_COVERAGE -> tr("Part of the area around you isn't covered by radar.")
+        ForecastIssue.NO_DATA -> tr("There's no radar data for this spot right now, so there's no forecast.")
     }
 
     /** For the place lists and the radar widget: headline only. */

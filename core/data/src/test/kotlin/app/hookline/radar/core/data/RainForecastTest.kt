@@ -71,6 +71,23 @@ class RainForecastTest {
         assertTrue(f.endsInMin!! in 5..30)
     }
 
+    @Test fun missingDataAtThePlaceGivesNoForecast() {
+        val hole = LocalGrid(40.0, 23.0, 2.0, n, FloatArray(n * n) { i ->
+            val c = i % n; val r = i / n
+            if (c in 27..33 && r in 27..33) Float.NaN else 0f
+        }, t0)
+        val f = RainForecaster.analyse(kind, hole, hole, t0)
+        assertTrue(ForecastIssue.NO_DATA in f.issues)
+        assertEquals(Confidence.NONE, f.confidence)
+    }
+
+    @Test fun heavyClassMatchesTheHeavyThreshold() {
+        val (_, heavy) = RainSource.thresholdsFor(RainSource.Kind.OPERA_RATE)
+        assertEquals(RainIntensity.HEAVY, RainIntensity.of(RainSource.Kind.OPERA_RATE, heavy))
+        val (_, heavyDbz) = RainSource.thresholdsFor(RainSource.Kind.MRMS_DBZ)
+        assertEquals(RainIntensity.HEAVY, RainIntensity.of(RainSource.Kind.MRMS_DBZ, heavyDbz))
+    }
+
     @Test fun minutesFromNowSubtractsDataAge() {
         val f = RainForecaster.analyse(kind, dry, dry, t0)
         assertEquals(20, f.minutesFromNow(30, t0 + 10 * 60_000))
