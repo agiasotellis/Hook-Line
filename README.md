@@ -47,7 +47,7 @@ Requirements: JDK 17, Android SDK 36.
 CI (GitHub Actions) runs both on every push and uploads the debug APK as an artifact.
 
 ## Status
-1.0.0 release candidate. Targets Android 16 (API 36); English, Greek and German. Sold as a 7-day free trial plus a one-time in-app unlock. Release process: [docs/PLAY-RELEASE.md](docs/PLAY-RELEASE.md); Play submission paperwork: [docs/play/](docs/play/); privacy policy: [docs/privacy/PRIVACY.md](docs/privacy/PRIVACY.md).
+1.0.0 release candidate. Targets Android 16 (API 36); English, Greek and German. Sold as a paid app: one payment in the Play Store, no subscription, no in-app purchases. Release process: [docs/PLAY-RELEASE.md](docs/PLAY-RELEASE.md); Play submission paperwork: [docs/play/](docs/play/); privacy policy: [docs/privacy/PRIVACY.md](docs/privacy/PRIVACY.md).
 
 Working now:
 - **Coverage**: 291 radars with open single-site data (155 NEXRAD in the US, 136 OPERA radars in 21 European countries) plus the OPERA pan-European composite (1 km, every 5 minutes), which also covers countries that don't share single-site data, such as Greece. The app starts at your location and switches to the nearest open radar as you zoom in; zoomed out in Europe it shows the composite.

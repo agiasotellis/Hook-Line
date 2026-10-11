@@ -12,12 +12,8 @@ Permissions in the app's own manifest: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCE
 - The same URL must be reachable from inside the app. *To do (app change, not done here):* add a "Privacy policy" link to the About sheet (`MenuSheets.kt`, `AboutSheet`). Google's User Data policy requires the link both in Play Console and in the app.
 
 ## App access
-- **Answer:** *All or some functionality in my app is restricted* → provide instructions. *(Alternative: "All functionality is available without special access". See note.)*
-- **Instructions for reviewers (paste):**
-
-  > No login or account is needed. Hookline Radar is free to download with a 7-day free trial in which every feature is unlocked. After 7 days a one-time in-app purchase ("Hookline unlock", product ID hookline_unlock) is required to keep using the app; there is no subscription. The trial starts at first launch, so a fresh install always has 7 full days. To review: allow location (or pan the map to the US or Europe), open the menu for warnings, Storm Mode, places and layers; long-press the radar for values. Live radar needs internet. Purchases can be tested with a license tester account.
-
-- **Why "restricted" with instructions rather than "all available":** after 7 days the paywall covers the map. Reviewers usually test within days of install, but declaring the trial avoids a rejection for "app access" if a review happens on a device where the app was installed earlier. No credentials are needed, so leave username/password empty.
+- **Answer:** *All functionality in my app is available without any special access.*
+- Hookline Radar is a **paid app** (bought once in the Play Store). There is no login, account, trial or paywall: everything works after install. Leave the instructions empty.
 
 ## Ads
 - **Does your app contain ads?** → **No.** No ad SDK, no house ads, no sponsored content.
@@ -26,7 +22,7 @@ Permissions in the app's own manifest: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCE
 - **Does your app use advertising ID?** → **No.** (Required question for apps targeting Android 13+. Confirm `com.google.android.gms.permission.AD_ID` is absent from the merged manifest. No Google Play services ads/analytics library is included.)
 
 ## Content ratings
-- See `content-rating.md`. Category: All Other App Types. Expected: Everyone / PEGI 3 / USK 0 / IARC 3+, with In-App Purchases.
+- See `content-rating.md`. Category: All Other App Types. Expected: Everyone / PEGI 3 / USK 0 / IARC 3+.
 
 ## Target audience and content
 - **Target age groups:** tick **13–15, 16–17, 18 and over**. Do **not** tick 5 and under, 6–8 or 9–12.
@@ -44,7 +40,7 @@ Permissions in the app's own manifest: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCE
 - Required for **all** apps. → Select **"My app doesn't provide any health features"**.
 
 ## Financial features
-- Required for all apps. → Select **"My app doesn't provide any financial features"**. (A one-time in-app purchase is not a financial feature.)
+- Required for all apps. → Select **"My app doesn't provide any financial features"**. (Selling the app itself is not a financial feature.)
 
 ## Government apps
 - **Is your app developed by or on behalf of a government?** → **No.**
@@ -95,7 +91,7 @@ Google's Misleading Claims / Deceptive Behavior policy rejects apps with false o
 - **Never claim to be official, life-saving or guaranteed.** The listing says what the app displays and where the data comes from, and repeats that it is not an official warning service.
 - **Describe limits honestly.** Rain alerts are short-range extrapolation and "can't foresee storms that haven't formed yet" (in-app guide); background checks run about every 15 minutes, not instantly; data can be delayed or wrong; dual-pol in Europe is Germany only; the archive is NEXRAD since 2008 (US only); satellite is infrared imagery.
 - **Coverage claims must match the code:** 291 radars (155 NEXRAD + 136 OPERA); US and Europe for radar; MeteoAlarm warnings for 38 countries; lightning in the Americas and Europe/Africa.
-- **Pricing claims:** "free download, 7-day free trial, then one-time purchase, no subscription". The price is set per country in Play; don't hard-code "$19.99" in localized listings.
+- **Pricing claims:** "paid once, no subscription, no in-app purchases". The price is set per country in Play; don't hard-code a price in localized listings.
 - **README check:** the README's first line says "thirty years of archive"; the app offers the NEXRAD archive since 2008 (≈18 years). Don't copy "thirty years" into store text. (README not edited here.)
 - **Avoid naming competitors** in the listing (Google's metadata policy disallows using other apps' names to attract users).
 - **Screenshots must show the real app.** The images in `docs/img/` are labelled as procedurally generated mockups; do **not** use them as store screenshots, or Google may treat the listing as misleading.

@@ -29,25 +29,14 @@ Version numbers live in `app/build.gradle.kts` (`versionCode` must go up by at l
 
 Locally (with the Android SDK): `./gradlew :app:bundleRelease` with the four `HOOKLINE_*` environment variables set (`HOOKLINE_KEYSTORE_FILE` pointing at the .jks instead of the base64 secret).
 
-## 3. The in-app purchase
+## 3. Price
 
-The app sells one product. Create it in Play Console → Monetize → Products → **One-time products**:
+Hookline is a **paid app**: users pay once in the Play Store before downloading. There is no trial, paywall, subscription or in-app purchase in the code.
 
-- Product ID: **`hookline_unlock`** (must match `Entitlement.PRODUCT_ID`)
-- Name: "Hookline Unlock"; description: "Unlocks Hookline for good. One payment, no subscription."
-- Price: e.g. US$19.99, then set regional prices (suggested: €14.99 euro area; lower in lower-income markets).
-- Activate it.
-
-The product can only be created after a first app bundle with the Play Billing library has been uploaded (any testing track).
-
-How the app behaves:
-- First launch starts a **7-day free trial** with everything enabled.
-- After that, a paywall covers the map until the purchase; Storm Mode / rain alerts / the widget pause too.
-- "Restore purchase" re-checks Google Play (purchases follow the Google account, across phones).
-- Purchases are acknowledged immediately (Google refunds unacknowledged purchases after 3 days).
-- Debug builds skip the paywall.
-
-Testing purchases: add your Gmail as a **license tester** (Play Console → Settings → License testing). Testers get test cards that never charge.
+- Set the price in Play Console → Monetize with Play → **App pricing** (needs a payments profile). Suggested: US$19.99 base, then review the regional prices Play converts to (e.g. €14.99 in the euro area).
+- Google's rule: an app that has been offered for free can never become paid. Make sure the app is set to **Paid** before any release goes out.
+- Refunds follow Google Play's refund policy; you can also refund any order yourself in Order management.
+- Testing: **internal** testers install a paid app for free. Google's help says **closed** testers must buy it; check App pricing for a per-track price (some accounts can set the closed track to Free), otherwise refund your 12 testers in Order management after they buy.
 
 ## 4. Uploading
 

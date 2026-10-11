@@ -34,12 +34,11 @@ The following stays on your device. The developer cannot see it.
 | Your location (last known position) | To centre the map, pick the nearest radar, show the "your location" dot, measure storm arrival times, and set the "Current location" place used by Storm Mode | Replaced each time the app gets a new position; removed if you uninstall or clear the app's data |
 | Saved places (the name you give and the coordinates) | Storm Mode warnings and "rain starting soon" alerts for those places | Until you remove the place or uninstall |
 | Settings (units, layers, map position, Storm Mode on/off, warning level, Wi-Fi-only rain checks, night vision, etc.) | To remember your choices | Until you change them or uninstall |
-| Rain outlook and small radar grids around your places | To detect rain moving towards a place and draw the widget | Overwritten at each check |
+| Rain outlook and small radar grids around your places and around where you are | To detect rain moving towards a place and draw the widget | Overwritten at each check |
 | IDs of warnings already notified (the last 300) | So each warning notifies you only once | Rolling list |
 | Offline map areas you download | Base map without signal | Until you delete them in the app or uninstall |
 | Pictures and GIFs you create for sharing | Handed to the share sheet | Deleted when you share the next one; Android may also clear the cache |
 | Crash report | See section 2 | Until you send or dismiss it |
-| Trial start date and whether you bought the unlock | Free trial and purchase | Until you uninstall (your purchase itself is kept by Google Play) |
 
 **Location permission.** Hookline asks for approximate location when it starts, and may ask for precise location when you tap the "show and follow your location" button. Android lets you choose approximate or precise. Location is only read **while the app is open**. Hookline does not request background location access and does not run a location foreground service. You can refuse or revoke location permission at any time in Android settings; the app still works, you just navigate the map yourself.
 
@@ -62,7 +61,6 @@ Hookline downloads weather and map data **directly from your phone** from the pu
 | **NASA GIBS**, gibs.earthdata.nasa.gov | Satellite imagery (GOES, Himawari) | The map tile coordinates you view (the visible map area). |
 | **EUMETSAT EUMETView**, view.eumetsat.int | Meteosat satellite imagery and lightning over Europe and Africa | The bounding box of each map tile you view (the visible map area). |
 | **OpenFreeMap**, tiles.openfreemap.org (map data © OpenStreetMap contributors) | Base map (roads, names, borders) and offline map downloads | The map tiles you view or download (the visible map area). |
-| **Google Play** (Google) | Free trial unlock purchase and restoring it | Handled by Google Play; see section 5. |
 
 If you zoom in on the map near where you are, the map area in these requests will be near where you are. The developer cannot link these requests to you, and none of them contain your name, email, saved place names or any identifier created by Hookline.
 
@@ -72,7 +70,7 @@ All of these connections use encryption (HTTPS).
 
 ## 5. Purchases
 
-Hookline is free to download with a 7-day free trial. After that, a single one-time in-app purchase ("Hookline unlock") through **Google Play Billing** unlocks the app permanently. There is no subscription. Payment is handled entirely by Google: the developer never sees your card or payment details. The app asks Google Play only whether this Google account owns the unlock, and confirms (acknowledges) a new purchase to Google Play. Google Play gives the developer the standard order information it provides for every purchase (such as order number, date, price, and the buyer's country, region and postal code), under [Google's privacy policy](https://policies.google.com/privacy). We use these only for accounting, tax and refunds, and keep them as long as tax law requires.
+Hookline is a paid app: you buy it once in the Google Play Store before installing it. There is no subscription and there are no in-app purchases. Payment is handled entirely by Google: the developer never sees your card or payment details, and the app itself does not contact Google Play. Google Play gives the developer the standard order information it provides for every purchase (such as order number, date, price, and the buyer's country, region and postal code), under [Google's privacy policy](https://policies.google.com/privacy). We use these only for accounting, tax and refunds, and keep them as long as tax law requires.
 
 ## 6. How information is used
 

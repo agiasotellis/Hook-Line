@@ -33,8 +33,7 @@ Answer **No** to every content question. The table lists each section with the r
 | Hate speech, discriminatory content, extremist symbols | No | |
 | Does the app allow users to interact or exchange content with other users (chat, posts, user profiles, UGC visible to others)? | **No** | There is no in-app communication. The Share button only hands a picture to Android's share sheet; the user sends it from another app. IARC's "Users Interact" element is for in-app communication. |
 | Does the app share the user's current physical location with other users? | **No** | Location is never shown to other users. (Requests to weather data services are covered by Data safety, not by this question.) |
-| Does the app allow users to purchase digital goods? | **Yes** | One-time in-app purchase `hookline_unlock` through Google Play Billing, after a 7-day trial. This adds the **In-App Purchases** interactive element. |
-| Does the purchase include random items (loot boxes)? | No | |
+| Does the app allow users to purchase digital goods? | **No** | Hookline is sold as a paid app in the Play Store; there are no in-app purchases. (Buying the app itself is not a "digital purchase" in this questionnaire.) |
 | Is the app a web browser or search engine / does it provide unrestricted internet access? | **No** | It loads only fixed weather and map services. No browser view, no arbitrary URLs. |
 | Does the app contain or promote content that is primarily for adults / any "adult" themes? | No | |
 | Is the app primarily a news or educational product? | No | |
@@ -43,9 +42,9 @@ Answer **No** to every content question. The table lists each section with the r
 
 | Authority | Expected rating |
 |---|---|
-| ESRB (Americas) | **Everyone**, interactive element: In-App Purchases |
-| PEGI (Europe) | **PEGI 3**, In-App Purchases |
-| USK (Germany) | **USK ab 0 Jahren** (USK 0), In-App-Käufe |
+| ESRB (Americas) | **Everyone** |
+| PEGI (Europe) | **PEGI 3** |
+| USK (Germany) | **USK ab 0 Jahren** (USK 0) |
 | ClassInd (Brazil) | **L** (Livre) |
 | Google Play rating (Korea apps, Russia) | All ages / 0+ |
 | IARC generic | **3+** |

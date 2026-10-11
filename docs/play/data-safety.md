@@ -12,7 +12,7 @@ This document gives the answer to type or tick for each question, followed by th
 | Fact | Where in the code |
 |---|---|
 | Permissions: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `POST_NOTIFICATIONS`. No background location, no foreground service, no exact alarm, no media permissions. | `app/src/main/AndroidManifest.xml` |
-| Libraries that talk to the network: OkHttp (own requests), MapLibre Android 11.5.2 (map tiles, no telemetry), Play Billing 8.0.0. No Firebase, no Google Play services location, no analytics/ads/crash SDK. | `app/build.gradle.kts`, `gradle/libs.versions.toml` |
+| Libraries that talk to the network: OkHttp (own requests), MapLibre Android 11.5.2 (map tiles, no telemetry). No Firebase, no Google Play services location, no analytics/ads/crash SDK. | `app/build.gradle.kts`, `gradle/libs.versions.toml` |
 | Location read only in the foreground: one-shot `LocationManager` fix on launch (coarse requested), precise requested only when the user taps the location/follow button; MapLibre location dot while the map is shown. | `map/DeviceLocation.kt`, `map/MapScreen.kt`, `map/BaseMap.kt` |
 | The last fix is stored on the device as the Storm Mode "Current location" (`storm_mode` prefs `home_lat/home_lon`). | `MapViewModel.onLocation` → `AlertChecker.setHome` |
 | Background: WorkManager every 15 min (`StormModeWorker`), Storm Mode on by default. Uses stored coordinates, never reads location. | `stormmode/StormModeWorker.kt`, `stormmode/AlertChecker.kt` |
@@ -22,7 +22,7 @@ This document gives the answer to type or tick for each question, followed by th
 | Rain alerts download whole composites (OPERA RATE for Europe, MRMS CONUS) and compute each place's outlook on the device. No coordinates sent. | `RainSource.kt`, `Nowcast.kt`, `AlertChecker.checkRain` |
 | Crash log written to app storage; only leaves the device if the user taps **Send report**, which opens the Android share sheet (`ACTION_SEND`, user picks the app and recipient). | `CrashLog.kt`, `MapScreen.kt` (CrashCard) |
 | Sharing radar pictures/GIFs: share sheet via FileProvider (`cache/shared`). | `share/Sharer.kt` |
-| Billing: one-time product `hookline_unlock`; app queries/acknowledges purchases through the Play Store app; purchase flag kept in local prefs. No developer server, no server-side verification. | `billing/Entitlement.kt` |
+| Paid app: bought in the Play Store; the app contains no billing library and never contacts Google Play. |
 | All endpoints are `https://`. | grep of `core/data`, `app` |
 | `android:allowBackup="true"` (Android Auto Backup to the user's Google account). | `AndroidManifest.xml` |
 

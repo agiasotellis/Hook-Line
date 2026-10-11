@@ -1,6 +1,6 @@
 # Hookline Radar – Google Play launch checklist
 
-For: individual developer, app `app.hookline.radar`, version 1.0.0 (versionCode 11), free download + 7-day trial + one-time in-app product `hookline_unlock`.
+For: individual developer, app `app.hookline.radar`, version 1.0.0 (versionCode 11), paid app (was: free download + 7-day trial + one-time in-app product `hookline_unlock`.
 Written 2026-10-07. Policy numbers checked that day; links at the end. Tick each box as you go.
 
 Companion documents in this folder: `store-listing.md`, `data-safety.md`, `content-rating.md`, `declarations.md`; privacy policy in `docs/privacy/`; signing and upload in `docs/PLAY-RELEASE.md`.
@@ -45,7 +45,7 @@ These are code or repo changes; none were made by this paperwork pass.
   - App name: **Hookline Radar**
   - Default language: **English (United States) – en-US**
   - App or game: **App**
-  - Free or paid: **Free** (the app is free to download; the unlock is an in-app product. A free app can't be changed to paid later, which is fine here.)
+  - Free or paid: **Paid**. Hookline is sold for one price in the Play Store. Google never lets a free app become paid, so this must be Paid before any release goes out.
   - Accept the Developer Program Policies and US export laws declarations.
 - [ ] **Store settings**: category **Weather**, tags, contact email (see `store-listing.md` §4).
 
@@ -60,21 +60,9 @@ These are code or repo changes; none were made by this paperwork pass.
 ## 5. Internal testing (first upload, billing setup, license testers)
 
 - [ ] **Testing → Internal testing → Create new release**, upload the AAB, release notes from `store-listing.md`, roll out. Add yourself (and anyone helping) as internal testers via an email list; open the opt-in link on your phone and install from Play.
-- [ ] After upload, check **App bundle explorer → Permissions**: expect INTERNET, ACCESS_NETWORK_STATE, ACCESS_COARSE/FINE_LOCATION, POST_NOTIFICATIONS, com.android.vending.BILLING and WorkManager's own (e.g. WAKE_LOCK, RECEIVE_BOOT_COMPLETED, possibly FOREGROUND_SERVICE). There must be **no** ACCESS_BACKGROUND_LOCATION, FOREGROUND_SERVICE_LOCATION, exact-alarm, full-screen-intent, READ_MEDIA_* or AD_ID. If something unexpected appears, fix the manifest before going further (see `declarations.md`).
+- [ ] After upload, check **App bundle explorer → Permissions**: expect INTERNET, ACCESS_NETWORK_STATE, ACCESS_COARSE/FINE_LOCATION, POST_NOTIFICATIONS and WorkManager's own (e.g. WAKE_LOCK, RECEIVE_BOOT_COMPLETED, possibly FOREGROUND_SERVICE). There must be **no** ACCESS_BACKGROUND_LOCATION, FOREGROUND_SERVICE_LOCATION, exact-alarm, full-screen-intent, READ_MEDIA_* or AD_ID. If something unexpected appears, fix the manifest before going further (see `declarations.md`).
 - [ ] Check the **pre-launch report** (automatic for testing tracks) for crashes and accessibility warnings.
-- [ ] **Create the in-app product** (possible once a build with the BILLING permission is uploaded and the merchant account exists): **Monetize with Play → Products → One-time products → Create**
-  - Product ID: **`hookline_unlock`** (must match `Entitlement.PRODUCT_ID`; can't be changed or reused later)
-  - Name: *Hookline unlock* (max 55 chars). Description (max 200): *Unlocks every Hookline Radar feature permanently. One payment, no subscription.*
-  - Purchase option: a single **Buy** option, not rentable, quantity 1.
-  - Price: **US$19.99** as the base, then let Play **convert to all countries** (or use a pricing template) and review the regional prices (e.g. €/£ round numbers like 19.99, lower prices in lower-income markets if you want).
-  - Tax category: digital app/software default.
-  - **Activate** the product.
-- [ ] **License testers**: **Settings (account level) → License testing** → add the Gmail accounts of you and your testers, response *RESPOND_NORMALLY*. They buy with test cards ("Test instrument, always approves", "…declines", slow cards) and are not charged. Test on a release build installed from the internal track:
-  - [ ] fresh install shows 7 days left; buying unlocks; the purchase is acknowledged (otherwise Play refunds it after 3 days, or 3 minutes for test purchases);
-  - [ ] **Restore purchase** after reinstall or on a second phone with the same account;
-  - [ ] pending payment ("slow test card") message;
-  - [ ] refund in *Order management*, then tap **Restore purchase**: the app re-locks once the trial is over (the code only clears the unlock on a manual Restore that finds no purchase);
-  - [ ] after the trial (change the device date forward 8 days, or wait), the paywall appears and Storm Mode stops notifying until unlocked.
+- [ ] **Set the price**: Monetize with Play → **App pricing** → US$19.99 base (review the converted regional prices). Needs the payments profile.
 
 ## 6. Closed testing (required for new personal accounts)
 

@@ -14,8 +14,6 @@ import java.util.concurrent.TimeUnit
 class StormModeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
 
     override suspend fun doWork(): Result = runCatching {
-        // After the free trial, Storm Mode needs the one-time unlock.
-        if (!app.hookline.radar.billing.Entitlement.allowed(applicationContext)) return Result.success()
         AlertChecker(applicationContext).check()
         Result.success()
     }.getOrElse { Result.retry() }

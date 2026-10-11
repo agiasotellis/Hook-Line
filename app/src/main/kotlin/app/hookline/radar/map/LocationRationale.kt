@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,7 +21,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.hookline.radar.R
-import app.hookline.radar.billing.BuyButton
 import app.hookline.radar.core.designsystem.Hookline
 import app.hookline.radar.i18n.tr
 
@@ -43,11 +44,25 @@ fun LocationRationale(onAllow: () -> Unit, onLater: () -> Unit) {
                 tr("Storm Mode keeps the last location you opened the app at, so it can check warnings and rain for it every 15 minutes, even when the app is closed. It never tracks you in the background. You can change this in Storm Mode at any time."),
                 style = Hookline.type.caption, color = c.inkSecondary,
             )
-            BuyButton(tr("Continue"), onClick = onAllow)
+            PrimaryButton(tr("Continue"), onClick = onAllow)
             Text(
                 tr("Not now"), style = Hookline.type.control, color = c.ink,
                 modifier = Modifier.align(Alignment.CenterHorizontally).clickable(role = Role.Button, onClick = onLater).padding(10.dp),
             )
         }
+    }
+}
+
+/** Full-width filled button for the one main action on a screen. */
+@Composable
+fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = Hookline.colors
+    androidx.compose.foundation.layout.Box(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .background(if (enabled) c.ink else c.hairline, androidx.compose.foundation.shape.RoundedCornerShape(28.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = Hookline.type.control, color = if (enabled) c.inkOnSelected else c.ink)
     }
 }

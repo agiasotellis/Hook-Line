@@ -81,8 +81,6 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     val radar = remember { RadarGlView(context).also { it.renderer.setClearColor(0xFF141B22.toInt()) } }
     val baseMap = remember { BaseMap(context) }
     var sheet by remember { mutableStateOf<Sheet?>(null) }
-    val entitlement = remember { app.hookline.radar.billing.Entitlement.get(context) }
-    val access by entitlement.access.collectAsStateWithLifecycle()
     // Loading screen: until the map style and the first radar picture are in (or 10 s at most).
     var mapReady by remember { mutableStateOf(false) }
     var loadingDone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
@@ -140,7 +138,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
                 Lifecycle.Event.ON_START -> { baseMap.onStart(); vm.setForeground(true) }
-                Lifecycle.Event.ON_RESUME -> { entitlement.refresh(); baseMap.onResume(); radar.onResume() }
+                Lifecycle.Event.ON_RESUME -> { baseMap.onResume(); radar.onResume() }
                 Lifecycle.Event.ON_PAUSE -> { radar.onPause(); baseMap.onPause() }
                 Lifecycle.Event.ON_STOP -> { baseMap.onStop(); vm.setForeground(false) }
                 else -> Unit
@@ -276,17 +274,13 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             busy?.let { Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { Chip(it, dot = true) } }
             if (s.measure != null) MeasureCard(s, onClear = vm::startMeasure, onClose = vm::closeMeasure, onCrossSection = vm::makeCrossSection)
             s.inspector?.let { InspectorCard(it, onDismiss = vm::dismissInspector) }
-            if (!s.styleAsked && loadingDone && !askLocation && access.allowed) {
+            if (!s.styleAsked && loadingDone && !askLocation) {
                 StyleChoiceCard(onSimple = { vm.setSimple(true) }, onAdvanced = { vm.setSimple(false) })
             }
             BottomDock(s, onProduct = vm::selectProduct, onPlay = vm::togglePlay, onScrub = vm::scrubTo, onHelp = { sheet = Sheet.SIMPLE_HELP })
         }
     }
 
-    // After the free trial: the paywall covers the map until the one-time unlock.
-    if (!access.allowed) {
-        app.hookline.radar.billing.PaywallScreen(access, entitlement::purchase, entitlement::restore)
-    }
     if (askLocation) {
         LocationRationale(
             onAllow = {
@@ -311,7 +305,6 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
         Sheet.MENU -> MenuSheet(
             s, onPick = { if (it == Sheet.ARCHIVE) vm.openArchive(); sheet = it }, onDismiss = close,
             top = {
-                app.hookline.radar.billing.TrialCard(access, entitlement::purchase, entitlement::restore)
                 ToggleRow(tr("Simple mode"), tr("Rain in plain words; advanced radar tools hidden"), s.simple, vm::setSimple)
             },
         )
