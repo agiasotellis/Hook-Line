@@ -65,7 +65,7 @@ import java.time.format.FormatStyle
 import app.hookline.radar.i18n.tr
 
 /** Public privacy policy (also linked from the Play listing). */
-const val PRIVACY_URL = "https://github.com/agiasotellis/couplet-radar/blob/main/docs/privacy/PRIVACY.md"
+const val PRIVACY_URL = "https://github.com/agiasotellis/Hook-Line/blob/main/docs/privacy/PRIVACY.md"
 
 /** The sheets reachable from the main menu. */
 enum class Sheet { MENU, RADARS, LAYERS, WARNINGS, STORM, PLACES, CELLS, ARCHIVE, GUIDE, ABOUT, RAIN, SIMPLE_HELP }
