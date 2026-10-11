@@ -17,11 +17,12 @@ object ForecastText {
         if (f.confidence == Confidence.NONE) return tr("No current rain forecast")
         val r = f.result
         val heavy = f.peak >= RainIntensity.HEAVY
+        val w = f.arrivalWindow
         return when {
             r.rainingNow -> if (r.heavy) tr("Heavy rain now") else tr("Raining now")
-            f.arrivalWindow != null -> {
-                val lo = f.minutesFromNow(f.arrivalWindow.first, now)
-                val hi = f.minutesFromNow(f.arrivalWindow.last, now).coerceAtLeast(lo + 5)
+            w != null -> {
+                val lo = f.minutesFromNow(w.first, now)
+                val hi = f.minutesFromNow(w.last, now).coerceAtLeast(lo + 5)
                 val likely = f.confidence != Confidence.LOW
                 when {
                     lo <= 0 && likely -> if (heavy) tr("Heavy rain likely within %s min", hi) else tr("Rain likely within %s min", hi)
@@ -38,8 +39,9 @@ object ForecastText {
     fun detail(f: RainForecast, now: Long): String {
         if (f.confidence == Confidence.NONE) return tr("The latest radar picture is too old to forecast from")
         val r = f.result
+        val ends = f.endsInMin
         return when {
-            r.rainingNow && f.endsInMin != null -> tr("Likely easing in about %s min", f.minutesFromNow(f.endsInMin, now).coerceAtLeast(5))
+            r.rainingNow && ends != null -> tr("Likely easing in about %s min", f.minutesFromNow(ends, now).coerceAtLeast(5))
             r.rainingNow && ForecastIssue.NO_MOTION in f.issues -> tr("Not enough radar history yet to tell when it stops")
             r.rainingNow -> tr("Likely to continue for the next hour")
             f.arrivalWindow != null -> intensity(f.peak)

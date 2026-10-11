@@ -58,6 +58,8 @@ import app.hookline.radar.core.radar.SweepTexture
 import app.hookline.radar.render.Outline
 import app.hookline.radar.render.RasterLayer
 import app.hookline.radar.stormmode.AlertChecker
+import app.hookline.radar.stormmode.RainOutlook
+import app.hookline.radar.core.data.RainSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -382,7 +384,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- rain forecast -------------------------------------------------------------
 
-    private val rainOutlook = app.hookline.radar.stormmode.RainOutlook(app, app.hookline.radar.core.data.RainSource(http))
+    private val rainOutlook = RainOutlook(app, RainSource(http))
     private var rainJob: Job? = null
     @Volatile private var foreground = true
 
@@ -414,9 +416,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
             val card = try {
                 when (val r = rainOutlook.forecast(point)) {
-                    is app.hookline.radar.stormmode.RainOutlook.Result.Ready ->
+                    is RainOutlook.Result.Ready ->
                         RainCard(RainCardStatus.READY, label, r.forecast, System.currentTimeMillis())
-                    app.hookline.radar.stormmode.RainOutlook.Result.NoCoverage -> RainCard(RainCardStatus.NO_COVERAGE, label)
+                    RainOutlook.Result.NoCoverage -> RainCard(RainCardStatus.NO_COVERAGE, label)
                 }
             } catch (e: CancellationException) {
                 throw e
