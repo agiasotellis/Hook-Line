@@ -57,7 +57,13 @@ class LocalGrid(
 }
 
 /** Storm motion estimated from two grids, in km per minute east and north. */
-data class GridMotion(val eastKmPerMin: Double, val northKmPerMin: Double, val score: Double)
+data class GridMotion(
+    val eastKmPerMin: Double,
+    val northKmPerMin: Double,
+    val score: Double,
+    /** Mismatch after shifting, relative to how far the rain is above the threshold: ~0.3 clean, > 0.8 the field changed shape. */
+    val relError: Double = Double.NaN,
+)
 
 data class NowcastResult(
     val rainingNow: Boolean,
@@ -117,8 +123,17 @@ object Nowcast {
             if (score < best) { best = score; bestDx = dx; bestDy = dy }
         }
         if (best == Double.MAX_VALUE) return null
+        // How well the shifted field matches: mean mismatch over mean rain value at the best shift.
+        var diff = 0.0; var mag = 0.0
+        for (r in 0 until n) for (c in 0 until n) {
+            val a = cur[c, r]; val b = prev[c - bestDx, r - bestDy]
+            if (!a.isNaN() && !b.isNaN() && (a >= threshold || b >= threshold)) {
+                diff += abs(a.coerceAtLeast(0f) - b.coerceAtLeast(0f)); mag += (max(a, b) - threshold).coerceAtLeast(0f).toDouble()
+            }
+        }
+        val rel = if (mag > 0) diff / mag else Double.NaN
         // Columns increase eastward, rows southward.
-        return GridMotion(bestDx * cur.cellKm / minutes, -bestDy * cur.cellKm / minutes, best)
+        return GridMotion(bestDx * cur.cellKm / minutes, -bestDy * cur.cellKm / minutes, best, rel)
     }
 
     /** Looks ahead 5..60 minutes at the grid centre. */

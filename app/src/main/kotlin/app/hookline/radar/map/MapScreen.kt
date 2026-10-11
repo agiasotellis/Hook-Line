@@ -139,10 +139,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     DisposableEffect(lifecycle) {
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
-                Lifecycle.Event.ON_START -> baseMap.onStart()
+                Lifecycle.Event.ON_START -> { baseMap.onStart(); vm.setForeground(true) }
                 Lifecycle.Event.ON_RESUME -> { entitlement.refresh(); baseMap.onResume(); radar.onResume() }
                 Lifecycle.Event.ON_PAUSE -> { radar.onPause(); baseMap.onPause() }
-                Lifecycle.Event.ON_STOP -> baseMap.onStop()
+                Lifecycle.Event.ON_STOP -> { baseMap.onStop(); vm.setForeground(false) }
                 else -> Unit
             }
         }
@@ -186,14 +186,24 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     WarningBanner(w, modifier = Modifier.weight(1f).clickable { sheet = Sheet.WARNINGS })
                 }
             }
+            if (s.archive?.index == null) {
+                RainCardView(
+                    s.rain, s.nowMillis,
+                    onClick = { sheet = Sheet.RAIN },
+                    onAllowLocation = {
+                        if (DeviceLocation.hasPermission(context)) vm.refreshRain()
+                        else locationPermission.launch(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                    },
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                StatusChip(s.status, s.showingLatest, s.mode)
+                StatusChip(s.status, s.showingLatest, s.mode, if (s.dataStale) s.frameAgeSeconds?.div(60) else null)
                 if (s.warnings.isNotEmpty()) {
                     Box(Modifier.clickable { sheet = Sheet.WARNINGS }) {
                         Chip(if (s.warnings.size == 1) tr("1 warning") else tr("%s warnings", s.warnings.size), swatch = Color(s.warnings.first().argb))
                     }
                 }
-                if (s.cells.isNotEmpty()) {
+                if (s.cells.isNotEmpty() && !s.simple) {
                     Box(Modifier.clickable { sheet = Sheet.CELLS }) {
                         Chip(if (s.cells.size == 1) tr("1 storm") else tr("%s storms", s.cells.size), swatch = Color(cellColor(s.cells.first())))
                     }
@@ -208,7 +218,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.End,
         ) {
-            TiltLadder(tilts = s.tilts, selected = s.tilt, onSelect = vm::selectTilt)
+            if (!s.simple) TiltLadder(tilts = s.tilts, selected = s.tilt, onSelect = vm::selectTilt)
             MapButton(if (following) tr("Stop following your location") else tr("Show and follow your location"), active = following, onClick = {
                 if (!DeviceLocation.hasPermission(context)) {
                     locationPermission.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
@@ -217,7 +227,7 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
                     baseMap.setFollow(following)
                 }
             }) { LocateIcon(it, following) }
-            if (s.mode == Mode.SITE) {
+            if (s.mode == Mode.SITE && !s.simple) {
                 MapButton(if (s.dualPane) tr("Single view") else tr("Reflectivity and velocity side by side"), active = s.dualPane, onClick = {
                     vm.setDualPane(!s.dualPane)
                 }) { DualIcon(it) }
@@ -266,7 +276,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             busy?.let { Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { Chip(it, dot = true) } }
             if (s.measure != null) MeasureCard(s, onClear = vm::startMeasure, onClose = vm::closeMeasure, onCrossSection = vm::makeCrossSection)
             s.inspector?.let { InspectorCard(it, onDismiss = vm::dismissInspector) }
-            BottomDock(s, onProduct = vm::selectProduct, onPlay = vm::togglePlay, onScrub = vm::scrubTo)
+            if (!s.styleAsked && loadingDone && !askLocation && access.allowed) {
+                StyleChoiceCard(onSimple = { vm.setSimple(true) }, onAdvanced = { vm.setSimple(false) })
+            }
+            BottomDock(s, onProduct = vm::selectProduct, onPlay = vm::togglePlay, onScrub = vm::scrubTo, onHelp = { sheet = Sheet.SIMPLE_HELP })
         }
     }
 
@@ -297,7 +310,10 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
     when (sheet) {
         Sheet.MENU -> MenuSheet(
             s, onPick = { if (it == Sheet.ARCHIVE) vm.openArchive(); sheet = it }, onDismiss = close,
-            top = { app.hookline.radar.billing.TrialCard(access, entitlement::purchase, entitlement::restore) },
+            top = {
+                app.hookline.radar.billing.TrialCard(access, entitlement::purchase, entitlement::restore)
+                ToggleRow(tr("Simple mode"), tr("Rain in plain words; advanced radar tools hidden"), s.simple, vm::setSimple)
+            },
         )
         Sheet.CELLS -> CellsSheet(s, onShow = { vm.showCell(it); sheet = null }, onDismiss = close)
         Sheet.ARCHIVE -> ArchiveSheet(
@@ -322,6 +338,8 @@ fun MapScreen(vm: MapViewModel = viewModel()) {
             onDismiss = close,
         )
         Sheet.GUIDE -> GuideSheet(close)
+        Sheet.RAIN -> RainSheet(s.rain, s.nowMillis, onAlerts = { sheet = Sheet.STORM }, onDismiss = close)
+        Sheet.SIMPLE_HELP -> SimpleHelpSheet(onAdvanced = { vm.setSimple(false); sheet = null }, onDismiss = close)
         Sheet.ABOUT -> AboutSheet(close)
         Sheet.LAYERS -> {
             val offline by vm.offline.ui.collectAsStateWithLifecycle()
@@ -427,9 +445,10 @@ private fun WarningBanner(w: WarningItem, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun StatusChip(status: FeedStatus, latest: Boolean, mode: Mode) {
+private fun StatusChip(status: FeedStatus, latest: Boolean, mode: Mode, delayedMinutes: Int?) {
     when {
         !latest && status == FeedStatus.Live -> Chip(tr("Looping, not live"))
+        delayedMinutes != null && status == FeedStatus.Live -> Chip(tr("Radar delayed: latest picture %s min old", delayedMinutes), strong = true)
         mode == Mode.MOSAIC -> Chip(tr("US mosaic, updates every few minutes"), dot = true)
         status == FeedStatus.Connecting -> Chip(if (mode == Mode.COMPOSITE) tr("Loading European radar…") else tr("Connecting to radar…"))
         status == FeedStatus.Live -> Chip(if (mode == Mode.COMPOSITE) tr("Live composite, every 5 min") else tr("Live"), dot = true)
@@ -503,7 +522,7 @@ private fun InspectorCard(i: Inspection, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -> Unit, onScrub: (Int) -> Unit) {
+private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -> Unit, onScrub: (Int) -> Unit, onHelp: () -> Unit) {
     val c = Hookline.colors
     Column(
         Modifier
@@ -513,7 +532,7 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Legend(s)
+        if (s.simple) SimpleLegend(onHelp) else Legend(s)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             val canPlay = s.loop.available && s.loop.frames.size >= 2
             Box(
@@ -526,25 +545,18 @@ private fun BottomDock(s: MapUiState, onProduct: (Product) -> Unit, onPlay: () -
             Column(Modifier.weight(1f)) {
                 LoopTape(s.loop, onScrub, Modifier.fillMaxWidth().height(36.dp))
                 Text(
-                    s.loop.loading ?: when {
-                        s.mode == Mode.NONE -> ""
-                        s.mode == Mode.MOSAIC -> tr("Loops: zoom in to a radar")
-                        !s.loop.available && s.mode == Mode.COMPOSITE -> tr("Loop needs at least two composites")
-                        !s.loop.available -> tr("Loops cover the lowest tilt for REF and velocity")
-                        s.frameEndMillis != null -> MapViewModel.clock(s.frameEndMillis) + if (s.showingLatest) ", " + tr("latest") else ""
-                        else -> ""
-                    },
-                    style = Hookline.type.caption, color = c.inkSecondary, maxLines = 1,
+                    s.loop.loading ?: freshness(s),
+                    style = Hookline.type.caption, color = if (s.dataStale) c.ink else c.inkSecondary, maxLines = 1,
                 )
             }
             val age = s.frameAgeSeconds
             Readout(
                 value = age?.let { if (it < 3600) "%d:%02d".format(Locale.US, it / 60, it % 60) else "${it / 3600} h" } ?: "–",
-                caption = if (age != null && age > 600 && s.showingLatest) tr("scan age, stale") else tr("scan age"),
+                caption = if (s.dataStale) tr("age, delayed") else tr("data age"),
                 alignEnd = true,
             )
         }
-        PillRow {
+        if (!s.simple) PillRow {
             Product.entries.forEach { p ->
                 val enabled = p in s.availableProducts
                 SelectPill(
@@ -663,15 +675,17 @@ private fun LayersSheet(
             ToggleRow(tr("Satellite where there's no radar"), tr("Infrared clouds from GOES, Meteosat and Himawari"), s.satellite, onSatellite)
             ToggleRow(tr("Warnings on the map"), tr("NWS in the US, MeteoAlarm in Europe"), s.showWarnings, onWarnings)
             ToggleRow(tr("Lightning"), s.lightningInfo ?: tr("Americas: NOAA GOES, about 1 MB a minute. Europe and Africa: Meteosat."), s.lightning, onLightning)
-            ToggleRow(tr("Storm cells"), tr("Rings and 30-minute paths for storms of 40 dBZ and up"), s.showCells, onCells)
-            Text(tr("US hail and rotation"), style = Hookline.type.body, color = c.ink)
-            PillRow {
-                listOf(null to tr("Off"), app.hookline.radar.core.data.MrmsTracks.Product.HAIL_24H to tr("Hail 24 h"),
-                    app.hookline.radar.core.data.MrmsTracks.Product.ROTATION_60M to tr("Rotation 1 h")).forEach { (p, label) ->
-                    SelectPill(label, selected = s.trackOverlay == p, onClick = { onTracks(p) }, modifier = Modifier.weight(1f))
+            if (!s.simple) {
+                ToggleRow(tr("Storm cells"), tr("Rings and 30-minute paths for storms of 40 dBZ and up"), s.showCells, onCells)
+                Text(tr("US hail and rotation"), style = Hookline.type.body, color = c.ink)
+                PillRow {
+                    listOf(null to tr("Off"), app.hookline.radar.core.data.MrmsTracks.Product.HAIL_24H to tr("Hail 24 h"),
+                        app.hookline.radar.core.data.MrmsTracks.Product.ROTATION_60M to tr("Rotation 1 h")).forEach { (p, label) ->
+                        SelectPill(label, selected = s.trackOverlay == p, onClick = { onTracks(p) }, modifier = Modifier.weight(1f))
+                    }
                 }
+                s.overlayInfo?.let { Text(it, style = Hookline.type.caption, color = c.inkSecondary) }
             }
-            s.overlayInfo?.let { Text(it, style = Hookline.type.caption, color = c.inkSecondary) }
             ToggleRow(tr("Night vision"), tr("Everything in dim red, to keep your eyes adjusted outdoors"), s.redNight, onRedNight)
             Text(tr("Units"), style = Hookline.type.body, color = c.ink)
             PillRow {
@@ -758,3 +772,26 @@ private fun LabeledSlider(label: String, value: Float, colors: androidx.compose.
 }
 
 private fun Float.roundToIntSafe(): Int = Math.round(this)
+
+/**
+ * When the picture on screen was observed (the radar's own time) and when it
+ * reached this phone, and whether it's behind. Mosaic and satellite pictures
+ * don't carry an observation time, so they say when they were refreshed.
+ */
+private fun freshness(s: MapUiState): String {
+    val end = s.frameEndMillis
+    return when {
+        s.mode == Mode.MOSAIC -> s.imageryMillis?.let { tr("NOAA mosaic, refreshed %s; runs a few minutes behind", MapViewModel.clock(it)) } ?: ""
+        s.mode == Mode.NONE -> if (s.satellite) s.imageryMillis?.let { tr("Satellite infrared, refreshed %s", MapViewModel.clock(it)) } ?: "" else ""
+        end != null && s.archive?.index != null -> tr("Archive scan observed %s", MapViewModel.clock(end))
+        end != null && !s.showingLatest -> tr("Loop frame observed %s", MapViewModel.clock(end))
+        end != null -> {
+            val base = s.receivedMillis?.let { tr("Observed %s · received %s", MapViewModel.clock(end), MapViewModel.clock(it)) }
+                ?: tr("Observed %s", MapViewModel.clock(end))
+            if (s.dataStale) base + " · " + tr("delayed") else base
+        }
+        !s.loop.available && s.mode == Mode.COMPOSITE -> tr("Loop needs at least two composites")
+        !s.loop.available -> tr("Loops cover the lowest tilt for REF and velocity")
+        else -> ""
+    }
+}

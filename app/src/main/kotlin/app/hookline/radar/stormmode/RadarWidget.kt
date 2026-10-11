@@ -67,7 +67,7 @@ class RadarWidget : AppWidgetProvider() {
         private fun prefs(context: Context) = context.getSharedPreferences("widget", Context.MODE_PRIVATE)
 
         /** Renders and pushes a new widget image and text. */
-        suspend fun publish(context: Context, place: Place, grid: LocalGrid, kind: RainSource.Kind, r: NowcastResult, warning: String?) {
+        suspend fun publish(context: Context, place: Place, grid: LocalGrid, kind: RainSource.Kind, outlook: String, warning: String?) {
             val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, RadarWidget::class.java))
             if (ids.isEmpty()) return
             val bmp = render(context, grid, kind)
@@ -75,7 +75,7 @@ class RadarWidget : AppWidgetProvider() {
             val time = DateTimeFormatter.ofPattern("HH:mm").format(Instant.ofEpochMilli(grid.timeMillis).atZone(ZoneId.systemDefault()))
             prefs(context).edit()
                 .putString("title", "${place.name} · $time")
-                .putString("outlook", nowcastSummary(r))
+                .putString("outlook", outlook)
                 .putString("warning", warning ?: "")
                 .apply()
             show(context, AppWidgetManager.getInstance(context), ids)

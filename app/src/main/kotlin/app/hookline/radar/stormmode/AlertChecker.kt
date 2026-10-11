@@ -25,6 +25,10 @@ import app.hookline.radar.core.data.WarningItem
 import app.hookline.radar.core.data.WarningLevel
 import app.hookline.radar.core.data.WarningRegions
 import app.hookline.radar.core.data.toWarningItem
+import app.hookline.radar.core.data.Confidence
+import app.hookline.radar.core.data.RainForecast
+import app.hookline.radar.core.data.RainForecaster
+import app.hookline.radar.i18n.ForecastText
 import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttpClient
 import java.io.File
@@ -49,6 +53,7 @@ class AlertChecker(private val context: Context) {
     private val meteoAlarm = MeteoAlarm(http)
     private val rainSource = RainSource(http)
     val store = PlaceStore(context)
+    val alertPrefs = AlertPrefs(context)
 
     /** Storm Mode on/off (on by default). */
     var enabled: Boolean
@@ -117,13 +122,18 @@ class AlertChecker(private val context: Context) {
                     if (place.id == widgetPlaceId(places)) widgetWarning = active.maxByOrNull { it.level.ordinal }?.event
                     active.filter { it.level >= WarningLevel.YELLOW }.forEach { widgetEntries += WarningsWidget.Entry.of(place.id, place.name, it) }
                     active.filter { it.level.ordinal >= euMinLevel.ordinal }
+                        .filter { mayNotifyWarning(it.level == WarningLevel.RED) }
                         .filter { markSeen("${it.id}:${it.level}:${place.id}") }
+                        .filter { isNew(place.id, it.event, it.level.ordinal) }
                         .forEach { notify(place.name, it) }
                 } else if (Coverage.inUs(point)) {
                     val alerts = nws.activeAt(point).filter { it.hazard != Hazard.OTHER }
                     if (place.id == widgetPlaceId(places)) widgetWarning = alerts.firstOrNull()?.event
                     alerts.forEach { widgetEntries += WarningsWidget.Entry.of(place.id, place.name, it.toWarningItem()) }
-                    alerts.filter { markSeen("${it.id}:${place.id}") }.forEach { notify(place.name, it) }
+                    alerts.filter { mayNotifyWarning(it.toWarningItem().level == WarningLevel.RED) }
+                        .filter { markSeen("${it.id}:${place.id}") }
+                        .filter { isNew(place.id, it.event, it.toWarningItem().level.ordinal) }
+                        .forEach { notify(place.name, it) }
                     found += alerts
                 }
             } catch (e: CancellationException) {
@@ -135,6 +145,7 @@ class AlertChecker(private val context: Context) {
         }
         runCatching { WarningsWidget.publish(context, widgetEntries, failed) }
         if (includeRain && rainDue()) checkRain(places, widgetWarning)
+        alertPrefs.lastCheckMillis = System.currentTimeMillis()
         return found
     }
 
@@ -169,7 +180,6 @@ class AlertChecker(private val context: Context) {
                 val (newestKey, newestTime) = keys.firstOrNull() ?: continue
                 val cur: RainFrame = rainSource.load(kind, newestKey, newestTime)
                 var older: RainFrame? = null
-                val (thr, heavy) = rainSource.thresholds(kind)
                 for (place in group) {
                     val center = LatLon(place.lat, place.lon)
                     val grid = cur.grid(center, CELL_KM, GRID)
@@ -183,13 +193,14 @@ class AlertChecker(private val context: Context) {
                         prev = older.grid(center, CELL_KM, GRID)
                     }
                     if (loadGrid(place.id)?.timeMillis != newestTime) saveGrid(place.id, grid)
-                    val motion = prev?.let { Nowcast.motion(it, grid, thr) }
-                    val result = Nowcast.forecast(grid, motion, thr, heavy)
-                    saveOutlook(place, nowcastSummary(result))
-                    if (place.rain) maybeNotifyRain(place, result)
+                    val now = System.currentTimeMillis()
+                    val forecast = RainForecaster.analyse(kind, grid, prev, now)
+                    val summary = ForecastText.summary(forecast, now)
+                    saveOutlook(place, summary)
+                    if (place.rain) maybeNotifyRain(place, forecast)
                     if (place.id == widgetId) {
-                        runCatching { RainBarWidget.publish(context, place, kind, newestTime, Nowcast.series(grid, motion), result) }
-                        runCatching { RadarWidget.publish(context, place, grid, kind, result, widgetWarning) }
+                        runCatching { RainBarWidget.publish(context, place, forecast) }
+                        runCatching { RadarWidget.publish(context, place, grid, kind, summary, widgetWarning) }
                     }
                 }
             } catch (e: CancellationException) {
@@ -209,24 +220,51 @@ class AlertChecker(private val context: Context) {
     private fun loadGrid(id: Long): LocalGrid? = gridFile(id).takeIf { it.exists() }?.let { LocalGrid.decode(it.readBytes()) }
     private fun saveGrid(id: Long, g: LocalGrid) = gridFile(id).writeBytes(g.encode())
 
-    /** One rain notification per place per 90 minutes, only for rain that hasn't started yet. */
+    /**
+     * One rain notification per place per 90 minutes, for rain that hasn't
+     * started yet, only when the forecast is reasonably confident, strong
+     * enough for the user's setting, and outside quiet hours.
+     */
     @SuppressLint("MissingPermission")
-    private fun maybeNotifyRain(place: Place, r: NowcastResult) {
-        val minutes = r.startsInMin ?: return
-        if (r.rainingNow) return
+    private fun maybeNotifyRain(place: Place, f: RainForecast) {
+        if (f.result.rainingNow) return
+        f.arrivalWindow ?: return
+        if (f.confidence == Confidence.LOW || f.confidence == Confidence.NONE) return
+        if (f.peak < alertPrefs.rainMin) return
+        val now = System.currentTimeMillis()
+        if (alertPrefs.inQuietHours(now)) return
         val key = "rain_notified_${place.id}"
-        if (System.currentTimeMillis() - prefs.getLong(key, 0) < 90 * 60_000L) return
+        if (now - prefs.getLong(key, 0) < 90 * 60_000L) return
         if (!canNotify()) return
-        prefs.edit().putLong(key, System.currentTimeMillis()).apply()
-        val title = if (r.heavy) tr("Heavy rain in about %s min at %s", minutes, place.name) else tr("Rain in about %s min at %s", minutes, place.name)
+        prefs.edit().putLong(key, now).apply()
         val n = NotificationCompat.Builder(context, HooklineApp.CHANNEL_RAIN)
             .setSmallIcon(app.hookline.radar.R.drawable.ic_stat_hookline)
-            .setContentTitle(title)
-            .setContentText(tr("From the latest radar and how the rain is moving. Tap to see it."))
+            .setContentTitle(tr("%s at %s", ForecastText.headline(f, now), place.name))
+            .setContentText(tr("%s. Forecast from the latest radar; showers can still form or fade.", ForecastText.confidence(f.confidence)))
             .setContentIntent(RadarWidget.openAppIntent(context))
             .setAutoCancel(true)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(("rain" + place.id).hashCode(), n)
+    }
+
+    /** Quiet hours hold back warnings, except red / tornado ones if the user allows them. */
+    private fun mayNotifyWarning(severe: Boolean): Boolean =
+        !alertPrefs.inQuietHours() || (severe && alertPrefs.quietLetSevere)
+
+    /**
+     * Duplicate suppression: warning services re-issue the same warning with a
+     * new id when they extend or update it. Notify again only if it's a new
+     * event for this place, or the level went up, or the last one was over 6 h ago.
+     */
+    private fun isNew(placeId: Long, event: String, level: Int): Boolean {
+        val k = "recent_${placeId}_${event.lowercase().hashCode()}"
+        val prev = prefs.getString(k, null)?.split('|')
+        val now = System.currentTimeMillis()
+        val prevLevel = prev?.getOrNull(0)?.toIntOrNull()
+        val prevTime = prev?.getOrNull(1)?.toLongOrNull() ?: 0L
+        val fresh = prevLevel == null || level > prevLevel || now - prevTime > 6 * 3_600_000L
+        if (fresh) prefs.edit().putString(k, "$level|$now").apply()
+        return fresh
     }
 
     // ---- warnings ---------------------------------------------------------------------------
@@ -280,6 +318,23 @@ class AlertChecker(private val context: Context) {
     }
 
     companion object {
+        /** A sample notification, to check that alerts reach the user. */
+        @SuppressLint("MissingPermission")
+        fun sendTest(context: Context): Boolean {
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) return false
+            val n = NotificationCompat.Builder(context, HooklineApp.CHANNEL_WARNINGS)
+                .setSmallIcon(app.hookline.radar.R.drawable.ic_stat_hookline)
+                .setContentTitle(tr("Test alert from Hookline"))
+                .setContentText(tr("Warnings and rain alerts will look like this."))
+                .setContentIntent(RadarWidget.openAppIntent(context))
+                .setAutoCancel(true)
+                .build()
+            context.getSystemService(NotificationManager::class.java).notify(4242, n)
+            return true
+        }
+
         /** Storm Mode switch, readable without building a checker (widgets). */
         fun isEnabled(context: Context): Boolean =
             context.getSharedPreferences("storm_mode", Context.MODE_PRIVATE).getBoolean("enabled", true)

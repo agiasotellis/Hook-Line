@@ -12,9 +12,9 @@ import android.widget.RemoteViews
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.hookline.radar.R
-import app.hookline.radar.core.data.NowcastResult
+import app.hookline.radar.core.data.RainForecast
 import app.hookline.radar.core.data.RainSource
-import app.hookline.radar.i18n.nowcastSummary
+import app.hookline.radar.i18n.ForecastText
 import app.hookline.radar.i18n.tr
 import java.time.Instant
 import java.time.ZoneId
@@ -45,15 +45,17 @@ class RainBarWidget : AppWidgetProvider() {
         private fun prefs(context: Context) = context.getSharedPreferences("widget_rain", Context.MODE_PRIVATE)
         private fun imageFile(context: Context) = java.io.File(context.filesDir, "widget_rain.png")
 
-        fun publish(context: Context, place: Place, kind: RainSource.Kind, radarTime: Long, series: FloatArray, r: NowcastResult) {
+        fun publish(context: Context, place: Place, f: RainForecast) {
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(ComponentName(context, RainBarWidget::class.java))
+            val kind = f.kind; val series = f.series
             prefs(context).edit()
                 .putString("place", place.name)
                 .putString("kind", kind.name)
-                .putLong("time", radarTime)
+                .putLong("time", f.observedMillis)
                 .putString("series", series.joinToString(",") { if (it.isNaN()) "" else it.toString() })
-                .putString("summary", nowcastSummary(r))
+                .putString("summary", ForecastText.headline(f, System.currentTimeMillis()))
+                .putString("confidence", ForecastText.confidence(f.confidence))
                 .apply()
             // Always render, so a widget added later shows the latest outlook straight away.
             imageFile(context).outputStream().use { render(kind, series).compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -139,7 +141,7 @@ class RainBarWidget : AppWidgetProvider() {
                 }
                 else -> {
                     v.setTextViewText(R.id.wr_summary, pr.getString("summary", "") ?: "")
-                    v.setTextViewText(R.id.wr_place, tr("%s · radar %s", pr.getString("place", "") ?: "", hm(time)))
+                    v.setTextViewText(R.id.wr_place, tr("%s · radar %s", pr.getString("place", "") ?: "", hm(time)) + (pr.getString("confidence", null)?.let { " · $it" } ?: ""))
                     android.graphics.BitmapFactory.decodeFile(file.path)?.let { v.setImageViewBitmap(R.id.wr_bars, it) }
                         ?: v.setImageViewResource(R.id.wr_bars, R.drawable.widget_rain_empty)
                 }

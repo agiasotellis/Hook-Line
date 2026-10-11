@@ -68,7 +68,7 @@ import app.hookline.radar.i18n.tr
 const val PRIVACY_URL = "https://github.com/agiasotellis/couplet-radar/blob/main/docs/privacy/PRIVACY.md"
 
 /** The sheets reachable from the main menu. */
-enum class Sheet { MENU, RADARS, LAYERS, WARNINGS, STORM, PLACES, CELLS, ARCHIVE, GUIDE, ABOUT }
+enum class Sheet { MENU, RADARS, LAYERS, WARNINGS, STORM, PLACES, CELLS, ARCHIVE, GUIDE, ABOUT, RAIN, SIMPLE_HELP }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,8 +118,8 @@ fun MenuSheet(s: MapUiState, onPick: (Sheet) -> Unit, onDismiss: () -> Unit, top
             s.places.firstOrNull { it.outlook != null }?.let { "${it.name}: ${it.outlook}" }
                 ?: if (s.places.isEmpty()) tr("Save places for warnings and rain alerts") else tr("%s watched", s.places.size),
         ) { onPick(Sheet.PLACES) }
-        MenuRow(tr("Storms"), if (s.cells.isEmpty()) tr("No strong storms in view") else tr("%s tracked, strongest %s dBZ", s.cells.size, s.cells.first().maxDbz.toInt())) { onPick(Sheet.CELLS) }
-        MenuRow(tr("Archive (US)"), tr("Any US radar scan since 2008")) { onPick(Sheet.ARCHIVE) }
+        if (!s.simple) MenuRow(tr("Storms"), if (s.cells.isEmpty()) tr("No strong storms in view") else tr("%s tracked, strongest %s dBZ", s.cells.size, s.cells.first().maxDbz.toInt())) { onPick(Sheet.CELLS) }
+        if (!s.simple) MenuRow(tr("Archive (US)"), tr("Any US radar scan since 2008")) { onPick(Sheet.ARCHIVE) }
         MenuRow(tr("Layers, loops and offline maps"), if (s.satellite) tr("Satellite where there's no radar") else tr("Satellite off")) { onPick(Sheet.LAYERS) }
         MenuRow(tr("Guide"), tr("What the colours mean, gestures")) { onPick(Sheet.GUIDE) }
         MenuRow(tr("About and data sources"), tr("Version %s", BuildConfig.VERSION_NAME)) { onPick(Sheet.ABOUT) }
@@ -363,7 +363,7 @@ fun StormModeSheet(
             style = Hookline.type.body, color = c.inkSecondary,
         )
         Text(
-            tr("Set from your device location (US and the 38 MeteoAlarm countries). Saved places are coming."),
+            tr("Set from your device location (US and the 38 MeteoAlarm countries). Saved places in Menu › Places each have their own warning and rain switches."),
             style = Hookline.type.caption, color = c.inkSecondary,
         )
         Spacer(Modifier.height(4.dp))
@@ -380,6 +380,12 @@ fun StormModeSheet(
             tr("Yellow: be aware. Orange: be prepared, dangerous weather expected. Red: take action, very dangerous weather."),
             style = Hookline.type.caption, color = c.inkSecondary,
         )
+        Text(
+            tr("Updated warnings for the same event and place don't notify again unless they get more severe."),
+            style = Hookline.type.caption, color = c.inkSecondary,
+        )
+        AlertSettingsSection()
+        DeliveryCheck()
     }
 }
 

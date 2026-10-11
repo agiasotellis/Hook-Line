@@ -183,8 +183,22 @@ data class MapUiState(
     val loopLength: Int = 12,
     val camera: CameraTarget? = null,
     val attribution: String = "",
+    /** Rain forecast for where you are: the headline card. */
+    val rain: RainCard = RainCard(),
+    /** Simple mode: plain rain legend, advanced radar controls hidden. */
+    val simple: Boolean = false,
+    /** Whether the simple/advanced choice was offered yet. */
+    val styleAsked: Boolean = true,
+    /** When the latest radar picture arrived on this phone (vs. when it was observed: frameEndMillis). */
+    val receivedMillis: Long? = null,
+    /** When the mosaic / satellite pictures were last requested. */
+    val imageryMillis: Long? = null,
 ) {
     val frameAgeSeconds: Int? get() = frameEndMillis?.let { ((nowMillis - it) / 1000).toInt().coerceAtLeast(0) }
+    /** Minutes after which the latest picture counts as delayed: single radars scan every ~5 min, the composite every 5–15. */
+    val staleAfterMinutes: Int get() = if (mode == Mode.COMPOSITE) 25 else 12
+    /** The latest picture is older than it should be. */
+    val dataStale: Boolean get() = showingLatest && archive?.index == null && (frameAgeSeconds ?: 0) > staleAfterMinutes * 60
     val showingLatest: Boolean get() = loop.index == null
     /** The product shown in the second pane. */
     val product2: Product get() = if (product == Product.REF) Product.VEL else Product.REF
@@ -195,6 +209,17 @@ data class MapUiState(
 }
 
 data class Inspection(val value: String, val meaning: String, val height: String)
+
+enum class RainCardStatus { NEED_LOCATION, LOADING, READY, NO_COVERAGE, ERROR }
+
+/** The headline rain forecast and where it's for. */
+data class RainCard(
+    val status: RainCardStatus = RainCardStatus.NEED_LOCATION,
+    val place: String? = null,
+    val forecast: app.hookline.radar.core.data.RainForecast? = null,
+    /** When the forecast was last refreshed on this phone. */
+    val checkedMillis: Long = 0,
+)
 
 /** A vertical slice through the radar volume along the measure line. Row 0 is the top. */
 class CrossSection(val width: Int, val height: Int, val values: FloatArray, val distanceM: Double, val topM: Double, val tilts: Int)
@@ -260,6 +285,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             lightning = prefs.getBoolean("lightning", false),
             showCells = prefs.getBoolean("cells", true),
             trackOverlay = prefs.getString("track_overlay", null)?.let { runCatching { MrmsTracks.Product.valueOf(it) }.getOrNull() },
+            simple = prefs.getBoolean("simple_mode", false),
+            styleAsked = prefs.getBoolean("style_asked", false),
         ),
     )
     val state: StateFlow<MapUiState> = _state.asStateFlow()
@@ -336,6 +363,82 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         _state.value.trackOverlay?.let { startTracks(it) }
         // Imagery URLs carry the time: refresh them every 5 minutes.
         viewModelScope.launch { while (isActive) { delay(300_000); updateImagery() } }
+        // Note when each new latest picture arrives, to show observed vs. received times.
+        viewModelScope.launch {
+            var lastEnd: Long? = null
+            state.collect { st ->
+                val end = st.frameEndMillis
+                if (end == null) {
+                    if (lastEnd != null) { lastEnd = null; _state.update { it.copy(receivedMillis = null) } }
+                } else if (st.showingLatest && (lastEnd == null || end > lastEnd!!)) {
+                    lastEnd = end
+                    _state.update { it.copy(receivedMillis = System.currentTimeMillis()) }
+                }
+            }
+        }
+        // Rain forecast for here: every 2 minutes while the app is on screen.
+        viewModelScope.launch { while (isActive) { if (foreground) refreshRain(); delay(120_000) } }
+    }
+
+    // ---- rain forecast -------------------------------------------------------------
+
+    private val rainOutlook = app.hookline.radar.stormmode.RainOutlook(app, app.hookline.radar.core.data.RainSource(http))
+    private var rainJob: Job? = null
+    @Volatile private var foreground = true
+
+    /** The app came to the screen or left it: forecasts only refresh while visible. */
+    fun setForeground(on: Boolean) {
+        foreground = on
+        if (on) refreshRain()
+    }
+
+    /** Where the headline forecast is for: your device, else Storm Mode's place, else your first saved place. */
+    private fun rainTarget(): Pair<String, LatLon>? {
+        _state.value.me?.let { return tr("Your location") to it }
+        checker.places().firstOrNull()?.let { (name, p) -> return (checker.homeLabel() ?: name) to p }
+        checker.store.saved().firstOrNull()?.let { return it.name to LatLon(it.lat, it.lon) }
+        return null
+    }
+
+    fun refreshRain() {
+        if (rainJob?.isActive == true) return
+        val target = rainTarget()
+        if (target == null) {
+            _state.update { it.copy(rain = RainCard(RainCardStatus.NEED_LOCATION)) }
+            return
+        }
+        val (label, point) = target
+        rainJob = viewModelScope.launch {
+            if (_state.value.rain.forecast == null || _state.value.rain.place != label) {
+                _state.update { it.copy(rain = RainCard(RainCardStatus.LOADING, label)) }
+            }
+            val card = try {
+                when (val r = rainOutlook.forecast(point)) {
+                    is app.hookline.radar.stormmode.RainOutlook.Result.Ready ->
+                        RainCard(RainCardStatus.READY, label, r.forecast, System.currentTimeMillis())
+                    app.hookline.radar.stormmode.RainOutlook.Result.NoCoverage -> RainCard(RainCardStatus.NO_COVERAGE, label)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // Network or memory trouble: keep the last forecast if there is one, marked by its age.
+                _state.value.rain.takeIf { it.forecast != null && it.place == label } ?: RainCard(RainCardStatus.ERROR, label)
+            }
+            _state.update { it.copy(rain = card) }
+        }
+    }
+
+    // ---- simple mode -----------------------------------------------------------------
+
+    /** Simple mode: rain only, plain words; advanced radar controls hidden but one switch away. */
+    fun setSimple(on: Boolean) {
+        prefs.edit().putBoolean("simple_mode", on).putBoolean("style_asked", true).apply()
+        _state.update { it.copy(simple = on, styleAsked = true) }
+        if (on) {
+            if (_state.value.product != Product.REF) selectProduct(Product.REF)
+            if (_state.value.dualPane) setDualPane(false)
+        }
+        rebuildOverlays()
     }
 
     // ---- camera and location ------------------------------------------------------
@@ -368,6 +471,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             syncStormMode()
             refreshAlerts()
         }
+        refreshRain()
         if (!prefs.getBoolean("located_once", false)) {
             prefs.edit().putBoolean("located_once", true).apply()
             val zoom = if (Sites.nearest(p) != null) 7.0 else 5.5
@@ -472,7 +576,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (s.satellite && s.mode == Mode.NONE) list += Imagery.satellites(eumetsat).map { it to 0.75f }
         if (s.mode == Mode.MOSAIC) list += Imagery.mrms(System.currentTimeMillis() / 300_000) to 0.9f
         if (s.lightning) list += Imagery.mtgLightning() to 0.95f
-        _state.update { it.copy(imagery = list, attribution = attributionFor(it.mode, it.site)) }
+        _state.update { it.copy(imagery = list, attribution = attributionFor(it.mode, it.site), imageryMillis = System.currentTimeMillis()) }
     }
 
     /** EUMETView layer names, cached for a week. */
@@ -1733,7 +1837,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         list += measureOutlines(o)
         list += placeOutlines(o)
         if (_state.value.lightning) list += lightningOutlines(o)
-        if (_state.value.showCells) list += cellOutlines(o)
+        if (_state.value.showCells && !_state.value.simple) list += cellOutlines(o)
         for (a in alerts) {
             if (!_state.value.showWarnings) break
             val (argb, width) = when (a.hazard) {
@@ -1816,7 +1920,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         )
         return when (p) {
             Product.REF -> Inspection(
-                "${v.roundToInt()} dBZ",
+                if (_state.value.simple) when {
+                    v < 30 -> tr("Light rain")
+                    v < 40 -> tr("Moderate rain")
+                    v < 50 -> tr("Heavy rain")
+                    v < 60 -> tr("Very heavy rain")
+                    else -> tr("Hail likely")
+                } else "${v.roundToInt()} dBZ",
                 when {
                     v < 20 -> tr("Light rain, drizzle or snow.")
                     v < 40 -> tr("Moderate rain.")
