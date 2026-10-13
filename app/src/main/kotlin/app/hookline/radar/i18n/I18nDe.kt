@@ -509,4 +509,6 @@ private fun dePart2(): Map<String, String> = mapOf(
     "Needs another radar picture to tell if it's coming your way" to "Erst ein weiteres Radarbild zeigt, ob er zu dir zieht",
     "The rain's movement can't be measured yet: there's only one recent radar picture, or too little rain to track." to "Die Zugbewegung des Regens lässt sich noch nicht messen: Es gibt nur ein aktuelles Radarbild oder zu wenig Regen zum Verfolgen.",
     "There's no radar data for this spot right now, so there's no forecast." to "Für diesen Ort gibt es gerade keine Radardaten, daher keine Vorhersage.",
+    "Rain started since the last check (radar %s)." to "Seit der letzten Prüfung hat es angefangen zu regnen (Radar %s).",
+    "You get an alert when rain is on its way (medium confidence or better, or any heavy rain) and when rain starts at your place. At most one every 90 minutes per place." to "Du bekommst einen Hinweis, wenn Regen im Anzug ist (ab mittlerer Sicherheit oder bei jedem starken Regen) und wenn es an deinem Ort zu regnen beginnt. Höchstens einen alle 90 Minuten pro Ort.",
 )

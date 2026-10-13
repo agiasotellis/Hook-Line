@@ -83,8 +83,14 @@ data class RainForecast(
 }
 
 object RainForecaster {
-    const val OLD_DATA_MIN = 20
-    const val UNUSABLE_DATA_MIN = 45
+    /**
+     * When a picture counts as old, per source. The US MRMS mosaic arrives
+     * 2–4 minutes after the scan; the European OPERA rain-rate composite is
+     * published 15–30 minutes after its nominal time, so judging it by the US
+     * standard would mark almost every European forecast as out of date.
+     */
+    fun oldAfterMin(kind: RainSource.Kind): Int = when (kind) { RainSource.Kind.MRMS_DBZ -> 20; RainSource.Kind.OPERA_RATE -> 40 }
+    fun unusableAfterMin(kind: RainSource.Kind): Int = when (kind) { RainSource.Kind.MRMS_DBZ -> 45; RainSource.Kind.OPERA_RATE -> 70 }
 
     /**
      * Extrapolation nowcast plus an honest confidence: block-matching motion
@@ -108,7 +114,7 @@ object RainForecaster {
         val ageMin = ((nowMillis - cur.timeMillis) / 60_000L).toInt()
 
         val issues = mutableSetOf<ForecastIssue>()
-        if (ageMin > OLD_DATA_MIN) issues += ForecastIssue.OLD_DATA
+        if (ageMin > oldAfterMin(kind)) issues += ForecastIssue.OLD_DATA
         if (missing > cur.values.size / 4) issues += ForecastIssue.EDGE_OF_COVERAGE
         if (rainNearby) {
             if (motion == null) issues += ForecastIssue.NO_MOTION
@@ -130,7 +136,7 @@ object RainForecaster {
         if (series[0].isNaN() || missing > cur.values.size * 6 / 10) issues += ForecastIssue.NO_DATA
 
         val confidence = when {
-            ageMin > UNUSABLE_DATA_MIN || ForecastIssue.NO_DATA in issues -> Confidence.NONE
+            ageMin > unusableAfterMin(kind) || ForecastIssue.NO_DATA in issues -> Confidence.NONE
             else -> {
                 var score = 3
                 for (i in issues) score -= when (i) {

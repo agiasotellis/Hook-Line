@@ -222,34 +222,49 @@ class AlertChecker(private val context: Context) {
     private fun saveGrid(id: Long, g: LocalGrid) = gridFile(id).writeBytes(g.encode())
 
     /**
-     * One rain notification per place per 90 minutes, for rain that hasn't
-     * started yet, only when the forecast is reasonably confident, strong
-     * enough for the user's setting, and outside quiet hours.
+     * Rain alerts, at most one per place per 90 minutes, outside quiet hours,
+     * when the rain reaches the user's chosen strength:
+     * - "rain on its way": a forecast arrival still ahead, at medium confidence
+     *   or better, or at any confidence when it's heavy (showers and storms are
+     *   exactly when confidence is low and a warning matters most; the wording
+     *   then says "possible");
+     * - "rain has started": it's raining at the place now and wasn't at the
+     *   previous check, which catches showers that form overhead or arrive
+     *   between checks, which a forecast can't announce in advance.
      */
     @SuppressLint("MissingPermission")
     private fun maybeNotifyRain(place: Place, f: RainForecast) {
-        if (f.result.rainingNow) return
-        val window = f.arrivalWindow ?: return
-        if (f.confidence == Confidence.LOW || f.confidence == Confidence.NONE) return
-        if (app.hookline.radar.core.data.ForecastIssue.OLD_DATA in f.issues) return
-        // The predicted arrival is already behind us (old picture): nothing useful to announce.
-        if (f.minutesFromNow(window.last, System.currentTimeMillis()) <= 0) return
-        if (f.peak < alertPrefs.rainMin) return
         val now = System.currentTimeMillis()
+        val stateKey = "rain_state_${place.id}"
+        val wasRaining = prefs.getBoolean(stateKey, false)
+        if (f.confidence != Confidence.NONE) prefs.edit().putBoolean(stateKey, f.result.rainingNow).apply()
+        if (f.confidence == Confidence.NONE) return
+        val nowIntensity = app.hookline.radar.core.data.RainIntensity.of(f.kind, f.series[0])
+        val started = f.result.rainingNow && !wasRaining && nowIntensity >= alertPrefs.rainMin
+        val window = f.arrivalWindow
+        val coming = !f.result.rainingNow && window != null &&
+            f.minutesFromNow(window.last, now) > 0 &&
+            f.peak >= alertPrefs.rainMin &&
+            (f.confidence != Confidence.LOW || f.peak >= app.hookline.radar.core.data.RainIntensity.HEAVY)
+        if (!started && !coming) return
         if (alertPrefs.inQuietHours(now)) return
         val key = "rain_notified_${place.id}"
         if (now - prefs.getLong(key, 0) < 90 * 60_000L) return
         if (!canNotify()) return
         prefs.edit().putLong(key, now).apply()
+        val text = if (started) tr("Rain started since the last check (radar %s).", clock(f.observedMillis))
+        else tr("%s. Forecast from the latest radar; showers can still form or fade.", ForecastText.confidence(f.confidence))
         val n = NotificationCompat.Builder(context, HooklineApp.CHANNEL_RAIN)
             .setSmallIcon(app.hookline.radar.R.drawable.ic_stat_hookline)
             .setContentTitle(tr("%s at %s", ForecastText.headline(f, now), place.name))
-            .setContentText(tr("%s. Forecast from the latest radar; showers can still form or fade.", ForecastText.confidence(f.confidence)))
+            .setContentText(text)
             .setContentIntent(RadarWidget.openAppIntent(context))
             .setAutoCancel(true)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(("rain" + place.id).hashCode(), n)
     }
+
+    private fun clock(ms: Long) = DateTimeFormatter.ofPattern("HH:mm").format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()))
 
     /** Quiet hours hold back warnings, except severe ones if the user allows them. */
     private fun mayNotifyWarning(severe: Boolean): Boolean =

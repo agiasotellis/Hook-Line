@@ -68,7 +68,7 @@ fun AlertSettingsSection() {
         }
     }
     Text(
-        tr("Rain alerts only go out when the forecast is at least medium confidence, at most once every 90 minutes per place."),
+        tr("You get an alert when rain is on its way (medium confidence or better, or any heavy rain) and when rain starts at your place. At most one every 90 minutes per place."),
         style = Hookline.type.caption, color = c.inkSecondary,
     )
 

@@ -509,4 +509,6 @@ private fun elPart2(): Map<String, String> = mapOf(
     "Needs another radar picture to tell if it's coming your way" to "Χρειάζεται άλλη μία εικόνα ραντάρ για να φανεί αν έρχεται προς εσάς",
     "The rain's movement can't be measured yet: there's only one recent radar picture, or too little rain to track." to "Η κίνηση της βροχής δεν μπορεί ακόμη να μετρηθεί: υπάρχει μόνο μία πρόσφατη εικόνα ραντάρ ή πολύ λίγη βροχή για παρακολούθηση.",
     "There's no radar data for this spot right now, so there's no forecast." to "Δεν υπάρχουν αυτή τη στιγμή δεδομένα ραντάρ για αυτό το σημείο, οπότε δεν υπάρχει πρόγνωση.",
+    "Rain started since the last check (radar %s)." to "Η βροχή άρχισε μετά τον τελευταίο έλεγχο (ραντάρ %s).",
+    "You get an alert when rain is on its way (medium confidence or better, or any heavy rain) and when rain starts at your place. At most one every 90 minutes per place." to "Λαμβάνετε ειδοποίηση όταν έρχεται βροχή (με τουλάχιστον μέτρια βεβαιότητα, ή για κάθε ισχυρή βροχή) και όταν αρχίζει να βρέχει στο μέρος σας. Το πολύ μία κάθε 90 λεπτά για κάθε μέρος.",
 )

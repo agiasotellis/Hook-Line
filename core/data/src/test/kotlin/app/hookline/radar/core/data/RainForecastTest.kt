@@ -51,8 +51,14 @@ class RainForecastTest {
     }
 
     @Test fun oldDataLowersAndThenRemovesConfidence() {
-        assertTrue(ForecastIssue.OLD_DATA in RainForecaster.analyse(kind, dry, dry, t0 + 30 * 60_000).issues)
-        assertEquals(Confidence.NONE, RainForecaster.analyse(kind, dry, dry, t0 + 50 * 60_000).confidence)
+        // Europe (OPERA): published 15–30 min late, so 30 min is normal; old after 40, unusable after 70.
+        assertTrue(ForecastIssue.OLD_DATA !in RainForecaster.analyse(kind, dry, dry, t0 + 30 * 60_000).issues)
+        assertTrue(ForecastIssue.OLD_DATA in RainForecaster.analyse(kind, dry, dry, t0 + 45 * 60_000).issues)
+        assertEquals(Confidence.NONE, RainForecaster.analyse(kind, dry, dry, t0 + 75 * 60_000).confidence)
+        // US (MRMS): old after 20, unusable after 45.
+        val us = RainSource.Kind.MRMS_DBZ
+        assertTrue(ForecastIssue.OLD_DATA in RainForecaster.analyse(us, dry, dry, t0 + 25 * 60_000).issues)
+        assertEquals(Confidence.NONE, RainForecaster.analyse(us, dry, dry, t0 + 50 * 60_000).confidence)
     }
 
     @Test fun growingRainIsFlagged() {

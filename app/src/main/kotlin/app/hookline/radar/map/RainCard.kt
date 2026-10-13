@@ -185,8 +185,8 @@ fun RainSheet(card: RainCard, now: Long, onAlerts: () -> Unit, onDismiss: () -> 
         val age = f.ageMinutes(now)
         Text(
             tr("Radar picture observed %s, checked %s.", MapViewModel.clock(f.observedMillis), MapViewModel.clock(card.checkedMillis)) +
-                if (age >= app.hookline.radar.core.data.RainForecaster.OLD_DATA_MIN) " " + tr("That's %s min ago: the forecast may be out of date.", age) else "",
-            style = Hookline.type.caption, color = if (age >= app.hookline.radar.core.data.RainForecaster.OLD_DATA_MIN) c.ink else c.inkSecondary,
+                if (age >= app.hookline.radar.core.data.RainForecaster.oldAfterMin(f.kind)) " " + tr("That's %s min ago: the forecast may be out of date.", age) else "",
+            style = Hookline.type.caption, color = if (age >= app.hookline.radar.core.data.RainForecaster.oldAfterMin(f.kind)) c.ink else c.inkSecondary,
         )
         Text(
             tr("How it works: Hookline compares the last two radar pictures, works out how the rain is moving and moves it forward. Times are a range because rain speeds up, slows and changes shape. It can't see new showers before they form, so in showery weather rain can arrive with no forecast."),
