@@ -86,7 +86,7 @@ jobs:
           cp app/build/outputs/bundle/release/app-release.aab "hookline-${TAG}-${SIGNED}.aab"
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.name.outputs.tag }}
           target_commitish: ${{ github.sha }}
